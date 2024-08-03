@@ -5,11 +5,11 @@ wd = None
 
 
 def get_web_driver(headless=False):
-    '''
-    Function to initialize and return a WebDriver instance for Chrome browser with specific configurations such as headless mode, 
-    full-page screenshot, and Chrome profile path. Handles importing necessary modules and setting up Chrome options. If WebDriver is already initialized, 
-    returns the existing instance. 
-    '''
+    """
+    Function to initialize and return a WebDriver instance for Chrome browser with specific configurations such as headless mode,
+    full-page screenshot, and Chrome profile path. Handles importing necessary modules and setting up Chrome options. If WebDriver is already initialized,
+    returns the existing instance.
+    """
     try:
         from selenium import webdriver
         from selenium.webdriver.chrome.service import Service as ChromeService
@@ -20,22 +20,25 @@ def get_web_driver(headless=False):
     try:
         from webdriver_manager.chrome import ChromeDriverManager
     except ImportError:
-        print("webdriver_manager not installed. Please install it with pip install webdriver-manager")
+        print(
+            "webdriver_manager not installed. Please install it with pip install webdriver-manager"
+        )
         raise ImportError
 
     try:
         from selenium_stealth import stealth
     except ImportError:
-        print("selenium_stealth not installed. Please install it with pip install selenium-stealth")
+        print(
+            "selenium_stealth not installed. Please install it with pip install selenium-stealth"
+        )
         raise ImportError
-    
+
     global wd
     selenium_config = {
         "chrome_profile_path": None,
         "headless": headless,
         "full_page_screenshot": True,
     }
-
 
     if wd:
         return wd
@@ -44,7 +47,9 @@ def get_web_driver(headless=False):
     profile_directory = None
     user_data_dir = None
     if isinstance(chrome_profile_path, str) and os.path.exists(chrome_profile_path):
-        profile_directory = os.path.split(chrome_profile_path)[-1].strip("\\").rstrip("/")
+        profile_directory = (
+            os.path.split(chrome_profile_path)[-1].strip("\\").rstrip("/")
+        )
         user_data_dir = os.path.split(chrome_profile_path)[0].strip("\\").rstrip("/")
         print(f"Using Chrome profile: {profile_directory}")
         print(f"Using Chrome user data dir: {user_data_dir}")
@@ -61,7 +66,7 @@ def get_web_driver(headless=False):
     # chrome_options.binary_location = "/usr/bin/chromium"
 
     if selenium_config.get("headless", False):
-        chrome_options.add_argument('--headless')
+        chrome_options.add_argument("--headless")
     if selenium_config.get("full_page_screenshot", False):
         chrome_options.add_argument("--start-maximized")
     else:
@@ -71,7 +76,9 @@ def get_web_driver(headless=False):
     chrome_options.add_argument("--window-size=960,1080")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--remote-debugging-port=9222")  # Ensure remote debugging is enabled.
+    chrome_options.add_argument(
+        "--remote-debugging-port=9222"
+    )  # Ensure remote debugging is enabled.
     chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--disable-popup-blocking")
     chrome_options.add_argument("--ignore-certificate-errors")
@@ -86,9 +93,11 @@ def get_web_driver(headless=False):
         chrome_options.add_argument(f"profile-directory={profile_directory}")
 
     try:
-        wd = webdriver.Chrome(service=ChromeService(chrome_driver_path), options=chrome_options)
+        wd = webdriver.Chrome(
+            service=ChromeService(chrome_driver_path), options=chrome_options
+        )
         # Print the actual profile path being used
-        if wd.capabilities['chrome']['userDataDir']:
+        if wd.capabilities["chrome"]["userDataDir"]:
             print(f"Profile path in use: {wd.capabilities['chrome']['userDataDir']}")
     except Exception as e:
         print(f"Error initializing WebDriver: {e}")
@@ -109,8 +118,9 @@ def get_web_driver(headless=False):
 
     return wd
 
+
 def get_citrix_cloud_data():
-    headless=True
+    headless = True
 
     wd = get_web_driver(headless)
     try:
@@ -119,9 +129,9 @@ def get_citrix_cloud_data():
         print("opened url")
 
         return True
-    
+
     except Exception as why:
-        print(f"Unhandled exception occurred. Please examine logs. Exiting")
+        print("Unhandled exception occurred. Please examine logs. Exiting")
         print(f"{traceback.format_exc()}")
         print(f"{traceback.format_exception_only(type(why), why)}")
         return False
@@ -129,6 +139,7 @@ def get_citrix_cloud_data():
     finally:
         wd.close()
         wd.quit()
+
 
 status = get_citrix_cloud_data()
 
