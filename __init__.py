@@ -108,14 +108,27 @@ class SSHClient:
                 if errors:
                     print("Errors while executing remote function:")
                     print(errors)
-                    return False
                 
                 return True
                 
             except Exception as e:
                 print(f"Failed to execute remote function: {e}")
+                return False
         else:
             print("Connection not established. Call login() first.")
+            return None
+    
+    def run_powershell_command(self, command, timeout=360):
+        """Run a PowerShell command on the remote server."""
+        if self.client:
+            try:
+                ps_command = f'powershell -Command "{command}"'
+                return self.run_command(ps_command, timeout)
+            except Exception as e:
+                print(f"Failed to execute remote powershell command: {e}")
+        else:
+            print("Connection not established. Call login() first.")
+        return None
 
     def ping(self):
         """Check the connectivity to the remote server by running the ping command."""
@@ -141,7 +154,7 @@ if __name__ == "__main__":
     hostname = "192.168.0.105"  # Replace with your server's hostname
     port = 22  # SSH port (usually 22)
     username = "chinni"  # Replace with your SSH username
-    password = "wipro@11"  # Replace with your SSH password
+    password = "password"  # Replace with your SSH password
 
     ssh_client = SSHClient(hostname, username, password)
     ssh_client.login()
@@ -152,4 +165,5 @@ if __name__ == "__main__":
     ssh_client.ping()
     # ssh_client.run_command("dir")
     # ssh_client.reboot()
+    ssh_client.run_powershell_command('Get-Process')
     ssh_client.close()

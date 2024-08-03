@@ -49,9 +49,9 @@ if errors:
 
 ```python
 
-# Run the Python remotely
-result = ssh_client.run_python_file("demo/selenium_test_script.py")
-print(f"Result from remote function: {result}")
+# Run the Python file remotely
+# Will copy to Remote machine (#default path: C:\temp)
+ssh_client.run_python_file("demo/selenium_test_script.py")
 ```
 
 #### Running PowerShell Commands
