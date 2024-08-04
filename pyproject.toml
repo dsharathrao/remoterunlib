@@ -1,0 +1,30 @@
+[tool.poetry]
+name = "remoterunlib"
+version = "1.0.1"
+description = "`remoterunlib` is a Python library that facilitates remote command execution"
+authors = ["Sharath Kumar"]
+license = ""
+readme = "README.md"
+
+[tool.poetry.urls]
+Repository = "https://github.com/dsharathrao/remoterunlib"
+
+[tool.poetry.dependencies]
+python = ">=3"
+paramiko = ">=3.4"
+
+[tool.poetry.group.dev.dependencies]
+paramiko = "^3.4.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+remoterunlib = "remoterunlib:SSHClient"
+
+[tool.poetry.extras]
+paramiko = ["paramiko"]
+
+[tool.poetry.build]
+generate-setup-file = false
