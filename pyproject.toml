@@ -1,0 +1,34 @@
+[tool.poetry]
+name = "remoterunlib"
+version = "0.1.1"
+description = "remoterunlib is a Python library that facilitates remote command execution"
+readme = "README.md"
+authors = ["Sharath Kumar <dsharathrao@gmail.com>"]
+repository = "https://github.com/dsharathrao/remoterunlib"
+license = "MIT"
+classifiers = [
+    "Environment :: Console",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    'Programming Language :: Python :: 3',
+    "Programming Language :: Python :: 3.7",
+]
+
+[tool.poetry.dependencies]
+python = "^3.6"
+paramiko = "3.4.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^6.2"
+pre-commit = "^2.12"
+towncrier = "^21.3"
+pytest-cov = "^2.11"
+responses = "^0.13.2"
+
+[tool.poetry.scripts]
+poetrify = "remoterunlib.cli:application.run"
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"
