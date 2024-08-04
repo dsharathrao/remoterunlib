@@ -10,7 +10,7 @@ with warnings.catch_warnings(action="ignore", category=CryptographyDeprecationWa
     import paramiko
     import paramiko.ssh_exception
 
-from utils import AuthenticationFailed, SSHException, UnableToConnect
+from .utils import AuthenticationFailed, SSHException, UnableToConnect
 
 
 
@@ -193,15 +193,16 @@ class SSHClient:
 
     def ping(self):
         """Check the connectivity to the remote server by running the ping command."""
-        return self.run_command(f"ping -n 5 {self.hostname}")
+        out, err = self.run_command(f"ping -n 5 {self.hostname}")
+        return not err
 
-    def reboot(self):
+    def reboot(self, wait_until=300):
         """Reboot remote mahine immediatly"""
         print("Rebooting remote machine")
         try:
             out,err = self.run_command("shutdown -r -t 0")
             time.sleep(20)
-            self.wait()
+            self.wait(timeout=wait_until)
             return not err
         except Exception as e:
             print(f"Unexpected error: {e}")
