@@ -53,61 +53,69 @@ class SSHClient:
     def run_command(self, command, timeout=TIMEOUT, verbose=True):
         """Run a command on the remote server with timeout and live output."""
         if self.client:
-            sys.stdout = io.StringIO() if not verbose else sys.__stdout__
+            try:
+                if verbose:
+                    sys.stdout = sys.__stdout__
+                else:
+                    sys.stdout = io.StringIO()
 
-            def target():
-                nonlocal output, errors
-                try:
-                    print(f"\nRun_Command: {command}")
-                    stdin, stdout, stderr = self.client.exec_command(command)
-                    start_time = time.time()
-                    while not stdout.channel.exit_status_ready():
-                        if time.time() - start_time > timeout:
-                            # Timeout occurred, kill the command
-                            stdout.channel.close()  # Send termination signal
-                            print(
-                                f"\nCommand timed out after {timeout} seconds and has been terminated."
-                            )
-                            break
-                        if stdout.channel.recv_ready():
-                            sys.stdout.write(stdout.channel.recv(1024).decode())
-                            sys.stdout.flush()
-                        if stderr.channel.recv_ready():
-                            sys.stderr.write(stderr.channel.recv(1024).decode())
-                            sys.stderr.flush()
-                        time.sleep(0.5)
-                    output = stdout.read().decode()
-                    errors = stderr.read().decode()
-                except Exception as e:
-                    errors = str(e)
+                def target():
+                    nonlocal output, errors
+                    try:
+                        print(f"\nRun_Command: {command}")
+                        stdin, stdout, stderr = self.client.exec_command(command)
+                        start_time = time.time()
+                        while not stdout.channel.exit_status_ready():
+                            if time.time() - start_time > timeout:
+                                # Timeout occurred, kill the command
+                                stdout.channel.close()  # Send termination signal
+                                print(
+                                    f"\nCommand timed out after {timeout} seconds and has been terminated."
+                                )
+                                break
+                            if stdout.channel.recv_ready():
+                                sys.stdout.write(stdout.channel.recv(1024).decode())
+                                sys.stdout.flush()
+                            if stderr.channel.recv_ready():
+                                sys.stderr.write(stderr.channel.recv(1024).decode())
+                                sys.stderr.flush()
+                            time.sleep(0.5)
+                        output = stdout.read().decode()
+                        errors = stderr.read().decode()
+                    except Exception as e:
+                        errors = str(e)
 
-            output = ""
-            errors = ""
-            thread = threading.Thread(target=target)
-            thread.start()
+                output = ""
+                errors = ""
+                thread = threading.Thread(target=target)
+                thread.start()
 
-            start_time = time.time()
-            while thread.is_alive():
-                if time.time() - start_time > timeout:
-                    # Timeout has occurred
-                    thread.join(timeout=0)  # Ensure the thread terminates
-                    break
-                time.sleep(0.5)
+                start_time = time.time()
+                while thread.is_alive():
+                    if time.time() - start_time > timeout:
+                        # Timeout has occurred
+                        thread.join(timeout=0)  # Ensure the thread terminates
+                        break
+                    time.sleep(0.5)
 
-            thread.join()  # Wait for the thread to finish
+                thread.join()  # Wait for the thread to finish
 
-            if output:
-                print("\nOutput:")
-                print(output)
-            if errors:
-                print("Errors:")
-                print(errors)
+                if output:
+                    print("\nOutput:")
+                    print(output)
+                if errors:
+                    print("Errors:")
+                    print(errors)
 
-            return output, errors
+                return output, errors
+            except Exception as why:
+                print("Got exception while running cmd: ")
+                print(f"Exception: {why}")
+            finally:
+                sys.stdout = sys.__stdout__
         else:
             print("Connection not established. Call login() first.")
-        if not verbose:
-            sys.stdout = sys.__stdout__
+
 
     def send_File(self, file):
         import os
@@ -122,6 +130,25 @@ class SSHClient:
         else:
             print("Connection not established. Call login() first.")
             return None
+        
+    def receive_File(self, remote_path, local_path):
+        """Receive a file from the remote machine to the local machine."""
+        if self.client:
+            try:
+                print(f"Receiving {remote_path} from remote machine")
+                sftp = self.client.open_sftp()
+                
+                # Retrieve the file from the remote machine
+                sftp.get(remote_path, local_path)
+                
+                print(f"Received file and saved as: {local_path}")
+            except Exception as e:
+                print(f"Failed to receive file: {e}")
+            finally:
+                sftp.close()
+        else:
+            print("Connection not established. Call login() first.")
+
 
     def run_python_file(self, script_file):
         """Run a Python function by name on the remote server."""
@@ -184,17 +211,18 @@ if __name__ == "__main__":
 
     ssh_client = SSHClient(hostname, username, password)
     ssh_client.login()
-    result = ssh_client.run_command(
-        "pip install bs4 selenium selenium_stealth webdriver-manager --upgrade"
-    )
-    print(result)
-    result = ssh_client.run_python_file("demo/selenium_test_script.py")
-    print(f"Result from remote function: {result}")
+    # result = ssh_client.run_command(
+    #     "pip install bs4 selenium selenium_stealth webdriver-manager --upgrade"
+    # )
+    # print(result)
+    # result = ssh_client.run_python_file("demo/selenium_test_script.py")
+    # print(f"Result from remote function: {result}")
     # ssh_client.run_command("dir")
     ssh_client.send_File("demo/demo_sendFile.txt")
-    ssh_client.ping()
+    ssh_client.receive_File("C:\\temp\\sharath.txt", "demo/sharath.txt")
+    # ssh_client.ping()
     # ssh_client.run_command("dir")
     # ssh_client.reboot()
-    result = ssh_client.run_powershell_command("Get-Process")
-    print(result)
+    # result = ssh_client.run_powershell_command("Get-Process")
+    # print(result)
     ssh_client.close()
