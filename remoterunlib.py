@@ -2,17 +2,21 @@ import io
 import sys
 import threading
 import time
+import traceback
 import warnings
 from cryptography.utils import CryptographyDeprecationWarning
 
 with warnings.catch_warnings(action="ignore", category=CryptographyDeprecationWarning):
     import paramiko
+    import paramiko.ssh_exception
 
-from utils import *
-TIMEOUT = 360
+from utils import AuthenticationFailed, SSHException, UnableToConnect
+
 
 
 class SSHClient:
+    TIMEOUT = 360
+    
     def __init__(self, hostname, username, password=None, port=22, key_file=None):
         self.hostname = hostname
         self.port = port
@@ -20,6 +24,10 @@ class SSHClient:
         self.password = password
         self.key_file = key_file
         self.client = None
+
+    @classmethod
+    def change_default_timeout(cls, new_timeout):
+        cls.TIMEOUT = new_timeout
 
     def login(self):
         """Establish an SSH connection to the server."""
@@ -48,7 +56,7 @@ class SSHClient:
             raise SSHException(f"Unable to establish SSH connection: {sshException}")
         except Exception as e:
             print(f"Exception in connecting: {e}")
-            raise UnableToConnect(f"Unable to connect {hostname}. Please check correct details")
+            raise UnableToConnect(f"Unable to connect {self.hostname}. Please check correct details")
 
     def run_command(self, command, timeout=TIMEOUT, verbose=True):
         """Run a command on the remote server with timeout and live output."""
@@ -150,7 +158,7 @@ class SSHClient:
             print("Connection not established. Call login() first.")
 
 
-    def run_python_file(self, script_file):
+    def run_python_file(self, script_file,timeout=TIMEOUT):
         """Run a Python function by name on the remote server."""
         import os
 
@@ -158,7 +166,7 @@ class SSHClient:
             try:
                 remote_script_path = self.send_File(script_file)
                 remote_command = f"python {remote_script_path}"
-                output, errors = self.run_command(remote_command, timeout=TIMEOUT)
+                output, errors = self.run_command(remote_command, timeout=timeout)
                 if errors:
                     print("Errors while executing remote function:")
                     print(errors)
@@ -190,7 +198,51 @@ class SSHClient:
     def reboot(self):
         """Reboot remote mahine immediatly"""
         print("Rebooting remote machine")
-        return self.run_command("shutdown -r -t 0")
+        try:
+            out,err = self.run_command("shutdown -r -t 0")
+            time.sleep(20)
+            self.wait()
+            return not err
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            print(traceback.format_exc())
+        return False
+    
+    def wait(self, timeout=300, interval=5):
+        """Wait until the remote machine is back online after a reboot.
+
+        Args:
+            timeout (int): Maximum time to wait in seconds.
+            interval (int): Interval between connection attempts in seconds.
+        """
+        print("Waiting for the remote machine...")
+        start_time = time.time()
+
+        while (time.time() - start_time) < timeout:
+            try:
+                # Attempt to establish a new SSH connection
+                self.client = paramiko.SSHClient()
+                self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                self.client.connect(
+                    hostname=self.hostname,
+                    port=self.port,
+                    username=self.username,
+                    password=self.password,
+                    timeout=10
+                )
+                print("Remote machine is back online.")
+                return True
+            except (TimeoutError, paramiko.ssh_exception.SSHException, paramiko.ssh_exception.NoValidConnectionsError) as e:
+                # If connection failed, wait for the interval period before retrying
+                print(f"Machine is not reachable yet (Error: {e}). Retrying in {interval} seconds...")
+                time.sleep(interval)
+            except Exception as e:
+                print(f"Unexpected error: {e}")
+                print(traceback.format_exc())
+                break
+
+        print("Timeout reached. The remote machine did not come back online.")
+        return False
 
     def close(self):
         """Close the SSH connection."""
@@ -200,29 +252,3 @@ class SSHClient:
         else:
             print("Connection was not established.")
 
-
-# # Example usage
-# if __name__ == "__main__":
-
-#     hostname = "192.168.0.105"  # Replace with your server's hostname or IP
-#     port = 22  # SSH port (usually 22)
-#     username = "username"  # Replace with your SSH username
-#     password = "password"  # Replace with your SSH password
-
-#     ssh_client = SSHClient(hostname, username, password)
-#     ssh_client.login()
-#     # result = ssh_client.run_command(
-#     #     "pip install bs4 selenium selenium_stealth webdriver-manager --upgrade"
-#     # )
-#     # print(result)
-#     # result = ssh_client.run_python_file("demo/selenium_test_script.py")
-#     # print(f"Result from remote function: {result}")
-#     # ssh_client.run_command("dir")
-#     ssh_client.send_File("demo/demo_sendFile.txt")
-#     ssh_client.receive_File("C:\\temp\\sharath.txt", "demo/sharath.txt")
-#     # ssh_client.ping()
-#     # ssh_client.run_command("dir")
-#     # ssh_client.reboot()
-#     # result = ssh_client.run_powershell_command("Get-Process")
-#     # print(result)
-#     ssh_client.close()
