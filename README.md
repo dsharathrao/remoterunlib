@@ -9,7 +9,7 @@
 - **Remote Command Execution**: Run shell commands on remote machines.
 - **Remote Python Function Invocation**: Serialize and execute Python functions remotely.
 - **PowerShell Command Execution**: Execute PowerShell commands on remote Windows machines.
-
+- **Remote machine Restart**: Restart the remote machine
 ## Installation
 
 Install the package using pip:
@@ -36,7 +36,7 @@ client.login()
 
 ```python
 # Run a shell command
-output, errors = client.run_command('ls -la')
+output, errors = client.run_command('ls -la', verbose=True) # if verbose False won't display live output in console
 if output:
     print("Shell Output:")
     print(output)
@@ -58,13 +58,27 @@ ssh_client.run_python_file("demo/selenium_test_script.py")
 
 ```python
 # Run a PowerShell command
-ps_output, ps_errors = client.run_powershell_command('Get-Process')
+ps_output, ps_errors = client.run_powershell_command('Get-Process', verbose=True)  # if verbose False won't display live output in console
 if ps_output:
     print("PowerShell Output:")
     print(ps_output)
 if ps_errors:
     print("PowerShell Errors:")
     print(ps_errors)
+```
+
+#### ping machine
+
+```python
+# ping the remote machine
+ssh_client.ping() # returns True if no errors occured
+```
+
+#### Reboot machine
+
+```python
+# Reboot remote machine and wait until wake up based on timeout
+ssh_client.reboot(wait_until=300) # wait until 300 seconds
 ```
 
 #### Closing the SSH Connection

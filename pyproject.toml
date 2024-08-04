@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "remoterunlib"
-version = "0.1.1"
+version = "0.1.4"
 description = "remoterunlib is a Python library that facilitates remote command execution"
 readme = "README.md"
 authors = ["Sharath Kumar <dsharathrao@gmail.com>"]
@@ -11,16 +11,21 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    'Operating System :: Microsoft :: Windows',
     'Programming Language :: Python :: 3',
     "Programming Language :: Python :: 3.7",
 ]
 
+[tool.poetry.urls]
+"Bug Tracker" = "https://github.com/dsharathrao/remoterunlib/issues"
+
 [tool.poetry.dependencies]
-python = "^3.6"
+python = ">=3.6"
 paramiko = "3.4.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2"
+paramiko = "3.4.0"
 pre-commit = "^2.12"
 towncrier = "^21.3"
 pytest-cov = "^2.11"
