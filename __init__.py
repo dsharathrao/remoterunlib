@@ -1,3 +1,4 @@
+import io
 import sys
 import threading
 import time
@@ -7,7 +8,8 @@ from cryptography.utils import CryptographyDeprecationWarning
 with warnings.catch_warnings(action="ignore", category=CryptographyDeprecationWarning):
     import paramiko
 
-TIMEOUT = 60
+from utils import *
+TIMEOUT = 360
 
 
 class SSHClient:
@@ -40,14 +42,18 @@ class SSHClient:
             print("Connected successfully.")
         except paramiko.AuthenticationException:
             print("Authentication failed.")
+            raise AuthenticationFailed("Authentication failed. Please check credentials.")
         except paramiko.SSHException as sshException:
             print(f"Unable to establish SSH connection: {sshException}")
+            raise SSHException(f"Unable to establish SSH connection: {sshException}")
         except Exception as e:
             print(f"Exception in connecting: {e}")
+            raise UnableToConnect(f"Unable to connect {hostname}. Please check correct details")
 
-    def run_command(self, command, timeout=TIMEOUT):
+    def run_command(self, command, timeout=TIMEOUT, verbose=True):
         """Run a command on the remote server with timeout and live output."""
         if self.client:
+            sys.stdout = io.StringIO() if not verbose else sys.__stdout__
 
             def target():
                 nonlocal output, errors
@@ -100,6 +106,22 @@ class SSHClient:
             return output, errors
         else:
             print("Connection not established. Call login() first.")
+        if not verbose:
+            sys.stdout = sys.__stdout__
+
+    def send_File(self, file):
+        import os
+        if self.client:
+            print(f"Sending {file} to remote machine")
+            sftp = self.client.open_sftp()
+            self.run_command("mkdir C:\\temp", verbose=False)
+            remote_script_path = f"C:\\temp\\{os.path.basename(file)}"
+            sftp.put(file, remote_script_path)
+            print(f"Sent file : {remote_script_path}")
+            return remote_script_path
+        else:
+            print("Connection not established. Call login() first.")
+            return None
 
     def run_python_file(self, script_file):
         """Run a Python function by name on the remote server."""
@@ -107,18 +129,12 @@ class SSHClient:
 
         if self.client:
             try:
-                sftp = self.client.open_sftp()
-                self.run_command("mkdir C:\\temp")
-                remote_script_path = f"C:\\temp\\{os.path.basename(script_file)}"
-                sftp.put(script_file, remote_script_path)
+                remote_script_path = self.send_File(script_file)
                 remote_command = f"python {remote_script_path}"
-
                 output, errors = self.run_command(remote_command, timeout=TIMEOUT)
-
                 if errors:
                     print("Errors while executing remote function:")
                     print(errors)
-
                 return True
 
             except Exception as e:
@@ -161,24 +177,24 @@ class SSHClient:
 # Example usage
 if __name__ == "__main__":
 
-    def add(a, b):
-        return a + b
-
-    hostname = "192.168.0.105"  # Replace with your server's hostname
+    hostname = "192.168.0.105"  # Replace with your server's hostname or IP
     port = 22  # SSH port (usually 22)
-    username = "chinni"  # Replace with your SSH username
+    username = "username"  # Replace with your SSH username
     password = "password"  # Replace with your SSH password
 
     ssh_client = SSHClient(hostname, username, password)
     ssh_client.login()
-    ssh_client.run_command(
+    result = ssh_client.run_command(
         "pip install bs4 selenium selenium_stealth webdriver-manager --upgrade"
     )
+    print(result)
     result = ssh_client.run_python_file("demo/selenium_test_script.py")
     print(f"Result from remote function: {result}")
     # ssh_client.run_command("dir")
+    ssh_client.send_File("demo/demo_sendFile.txt")
     ssh_client.ping()
     # ssh_client.run_command("dir")
     # ssh_client.reboot()
-    ssh_client.run_powershell_command("Get-Process")
+    result = ssh_client.run_powershell_command("Get-Process")
+    print(result)
     ssh_client.close()
