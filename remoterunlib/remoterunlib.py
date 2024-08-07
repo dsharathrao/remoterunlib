@@ -10,11 +10,10 @@ with warnings.catch_warnings(action="ignore", category=CryptographyDeprecationWa
     import paramiko
     import paramiko.ssh_exception
 
-from .utils import AuthenticationFailed, SSHException, UnableToConnect
+from .utils import AuthenticationFailed, SSHException, UnableToConnect, Singleton
 
 
-
-class SSHClient:
+class SSHClient(metaclass=Singleton):
     TIMEOUT = 360
     
     def __init__(self, hostname, username, password=None, port=22, key_file=None):
