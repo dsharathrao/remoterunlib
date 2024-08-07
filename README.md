@@ -3,6 +3,10 @@
 
 `remoterunlib` is a Python library that facilitates remote command execution, Python function invocation, and PowerShell command execution over SSH. It is built on top of the Paramiko library and provides a simple interface for managing SSH connections and running commands or functions on remote machines.
 
+## OpenSSH setup
+
+Windows : [openssh_install](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse?tabs=powershell)
+
 ## Features
 
 - **SSH Connection Management**: Easily manage SSH connections with support for password and key-based authentication.
