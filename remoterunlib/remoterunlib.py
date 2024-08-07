@@ -13,7 +13,6 @@ with warnings.catch_warnings(action="ignore", category=CryptographyDeprecationWa
 from .utils import AuthenticationFailed, SSHException, UnableToConnect, Singleton
 
 
-
 class SSHClient(metaclass=Singleton):
     TIMEOUT = 360
     
