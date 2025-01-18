@@ -124,14 +124,19 @@ class SSHClient(metaclass=Singleton):
             print("Connection not established. Call login() first.")
 
 
-    def send_File(self, file):
+    def send_File(self, file, path=None):
         import os
         if self.client:
             print(f"Sending {file} to remote machine")
             sftp = self.client.open_sftp()
-            self.run_command("mkdir C:\\temp", verbose=False)
-            remote_script_path = f"C:\\temp\\{os.path.basename(file)}"
-            sftp.put(file, remote_script_path)
+            if path:
+                self.run_command(f"mkdir {path}", verbose=False)
+                remote_script_path = f"{path}\\{os.path.basename(file)}"
+                sftp.put(file, remote_script_path)
+            else:
+                self.run_command("mkdir C:\\temp", verbose=False)
+                remote_script_path = f"C:\\temp\\{os.path.basename(file)}"
+                sftp.put(file, remote_script_path)
             print(f"Sent file : {remote_script_path}")
             return remote_script_path
         else:
@@ -149,12 +154,15 @@ class SSHClient(metaclass=Singleton):
                 sftp.get(remote_path, local_path)
                 
                 print(f"Received file and saved as: {local_path}")
+                return True
             except Exception as e:
                 print(f"Failed to receive file: {e}")
+                return False
             finally:
                 sftp.close()
         else:
             print("Connection not established. Call login() first.")
+            return None
 
 
     def run_python_file(self, script_file,timeout=TIMEOUT):

@@ -49,6 +49,31 @@ if errors:
     print(errors)
 ```
 
+#### Send files to remote machine
+
+```python
+# with default path
+remote_script_path = client.send_File("demo_sendFile.txt") # send to C:\temp (Creates temp directory if not exists)
+print(remote_script_path) # returns c:\temp\demo_sendFile.txt
+
+# with custom path
+remote_script_path = client.send_File("demo_sendFile.txt", "D:\\New") # send to D:\\New (Creates New directory if not exists)
+print(remote_script_path)
+
+```
+
+#### Receive files to remote machine
+
+```python
+status = client.receive_File("C:\\temp\\sharath.txt", "sharath.txt") # receive file from remote to local directory where script executes
+print(status) # return True, False or None (if connection not established)
+
+# with custom path
+status = client.receive_File("C:\\temp\\sharath.txt", "D:\\sharath.txt") # receive file from remote to local directory with the full path specified
+print(status) # return True, False or None (if connection not established)
+
+```
+
 #### Running Python Functions Remotely
 
 ```python
