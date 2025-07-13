@@ -124,21 +124,71 @@ class SSHClient(metaclass=Singleton):
             print("Connection not established. Call login() first.")
 
 
+    def get_remote_os(self):
+        """Detect the remote OS and return as a dict: {'os': 'windows'} or {'os': 'linux'}"""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"os": None}
+        try:
+            # Try Windows command
+            out, err = self.run_command("ver", verbose=False)
+            if out and "Microsoft" in out:
+                return {"os": "windows"}
+            # Try Linux command
+            out, err = self.run_command("uname", verbose=False)
+            if out and "Linux" in out:
+                return {"os": "linux"}
+        except Exception as e:
+            print(f"Error detecting remote OS: {e}")
+        return {"os": None}
+
     def send_File(self, file, path=None):
         import os
         if self.client:
-            print(f"Sending {file} to remote machine")
-            sftp = self.client.open_sftp()
-            if path:
-                self.run_command(f"mkdir {path}", verbose=False)
-                remote_script_path = f"{path}\\{os.path.basename(file)}"
-                sftp.put(file, remote_script_path)
-            else:
-                self.run_command("mkdir C:\\temp", verbose=False)
-                remote_script_path = f"C:\\temp\\{os.path.basename(file)}"
-                sftp.put(file, remote_script_path)
-            print(f"Sent file : {remote_script_path}")
-            return remote_script_path
+            try:
+                if not os.path.isfile(file):
+                    print(f"Local file does not exist: {file}")
+                    return None
+                print(f"Sending {file} to remote machine")
+                sftp = self.client.open_sftp()
+                remote_os = self.get_remote_os().get("os")
+                print(f"Detected remote OS: {remote_os}")
+                if path:
+                    if remote_os == "windows":
+                        self.run_command(f"mkdir {path}", verbose=False)
+                        remote_script_path = f"{path}\\{os.path.basename(file)}"
+                    else:
+                        self.run_command(f"mkdir -p {path}", verbose=False)
+                        remote_script_path = f"{path}/{os.path.basename(file)}"
+                    sftp.put(file, remote_script_path)
+                else:
+                    if remote_os and remote_os.lower() == "windows":
+                        temp_path = "C:\\temp"
+                        self.run_command(f"mkdir {temp_path}", verbose=False)
+                        remote_script_path = f"{temp_path}\\{os.path.basename(file)}"
+                    elif remote_os and remote_os.lower() == "linux":
+                        # Create temp directory and get its absolute path
+                        out, err = self.run_command("mktemp -d", verbose=False)
+                        temp_path = out.strip()
+                        if not temp_path:
+                            print("Failed to create temp directory on remote Linux.")
+                            return None
+                        remote_script_path = f"{temp_path}/{os.path.basename(file)}"
+                        print(f"Remote script path: {remote_script_path}")
+                    else:
+                        print("Unknown remote OS. Cannot determine temp path.")
+                        return None
+                    sftp.put(file, remote_script_path)
+                print(f"Sent file : {remote_script_path}")
+                return remote_script_path
+            except Exception as e:
+                print(f"Failed to send file: {e}")
+                return None
+            finally:
+                try:
+                    sftp.close()
+                except Exception:
+                    pass
         else:
             print("Connection not established. Call login() first.")
             return None
@@ -165,14 +215,27 @@ class SSHClient(metaclass=Singleton):
             return None
 
 
-    def run_python_file(self, script_file,timeout=TIMEOUT):
-        """Run a Python function by name on the remote server."""
+    def run_python_file(self, script_file, timeout=TIMEOUT):
+        """Run a Python script file on the remote server, using python3 for Linux and python for Windows."""
         import os
 
         if self.client:
             try:
                 remote_script_path = self.send_File(script_file)
-                remote_command = f"python {remote_script_path}"
+                print(f"Running remote script: {remote_script_path}")
+                if not remote_script_path:
+                    print("Failed to send script file to remote machine.")
+                    return False
+
+                remote_os = self.get_remote_os().get("os")
+                if remote_os == "linux":
+                    remote_command = f"python3 {remote_script_path}"
+                elif remote_os == "windows":
+                    remote_command = f"python {remote_script_path}"
+                else:
+                    print("Unknown remote OS. Cannot determine Python interpreter.")
+                    return False
+
                 output, errors = self.run_command(remote_command, timeout=timeout)
                 if errors:
                     print("Errors while executing remote function:")
@@ -188,15 +251,30 @@ class SSHClient(metaclass=Singleton):
 
     def run_powershell_command(self, command, timeout=360):
         """Run a PowerShell command on the remote server."""
-        if self.client:
-            try:
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return None
+
+        remote_os = self.get_remote_os().get("os")
+        try:
+            if remote_os == "windows":
                 ps_command = f'powershell -Command "{command}"'
                 return self.run_command(ps_command, timeout)
-            except Exception as e:
-                print(f"Failed to execute remote powershell command: {e}")
-        else:
-            print("Connection not established. Call login() first.")
-        return None
+            elif remote_os == "linux":
+                # Check if pwsh is available
+                out, err = self.run_command("which pwsh", verbose=False)
+                if out.strip():
+                    ps_command = f'pwsh -Command "{command}"'
+                    return self.run_command(ps_command, timeout)
+                else:
+                    print("PowerShell (pwsh) is not installed on the remote Linux machine. Please install the PowerShell package.")
+                    return None
+            else:
+                print("Unknown remote OS. Cannot run PowerShell command.")
+                return None
+        except Exception as e:
+            print(f"Failed to execute remote PowerShell command: {e}")
+            return None
 
     def ping(self):
         """Check the connectivity to the remote server by running the ping command."""
