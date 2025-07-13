@@ -4,6 +4,8 @@ import threading
 import time
 import traceback
 import warnings
+import subprocess
+import platform
 from cryptography.utils import CryptographyDeprecationWarning
 
 with warnings.catch_warnings(action="ignore", category=CryptographyDeprecationWarning):
@@ -277,15 +279,43 @@ class SSHClient(metaclass=Singleton):
             return None
 
     def ping(self):
-        """Check the connectivity to the remote server by running the ping command."""
-        out, err = self.run_command(f"ping -n 5 {self.hostname}")
-        return not err
+        """Check the connectivity to the remote server by running the ping command locally."""
+
+        count_flag = "-n" if platform.system().lower() == "windows" else "-c"
+        try:
+            result = subprocess.run(
+                ["ping", count_flag, "5", self.hostname],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=30
+            )
+            print(result.stdout)
+            if result.returncode == 0:
+                return True
+            else:
+                print(result.stderr)
+                return False
+        except Exception as e:
+            print(f"Ping failed: {e}")
+            return False
 
     def reboot(self, wait_until=300):
-        """Reboot remote mahine immediatly"""
+        """Reboot remote machine immediately, using appropriate command for Windows or Linux (no sudo)."""
         print("Rebooting remote machine")
         try:
-            out,err = self.run_command("shutdown -r -t 0")
+            remote_os = self.get_remote_os().get("os")
+            if remote_os == "windows":
+                # Use 'shutdown /r /t 0' for Windows, which does not require sudo
+                reboot_cmd = "shutdown /r /t 0"
+            elif remote_os == "linux":
+                # Try 'reboot' first, which does not require sudo on most systems
+                reboot_cmd = f"echo {self.password} | sudo -S  reboot"
+            else:
+                print("Unknown remote OS. Cannot determine reboot command.")
+                return False
+
+            out, err = self.run_command(reboot_cmd, verbose=False)
             time.sleep(20)
             self.wait(timeout=wait_until)
             return not err
@@ -294,7 +324,7 @@ class SSHClient(metaclass=Singleton):
             print(traceback.format_exc())
         return False
     
-    def wait(self, timeout=300, interval=5):
+    def wait(self, timeout=300, interval=10):
         """Wait until the remote machine is back online after a reboot.
 
         Args:
