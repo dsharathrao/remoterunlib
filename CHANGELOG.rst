@@ -1,32 +1,20 @@
-1.0.6 (2024-08-07)
+0.2 (2025-07-13)
 ==================
 
 Features
 --------
 
-- Added Singleton approch in SSHClient
+- Improved file transfer logic for both Windows and Linux (send_File, receive_File).
+- Enhanced remote OS detection for better reliability.
+- Added PowerShell command support for Linux (pwsh).
+- Improved reboot and wait logic for remote machines.
+- Various bug fixes and code cleanup.
 
-1.0.2 (2024-08-07)
+0.1.8 (2025-06-01)
 ==================
 
 Features
 --------
 
-- Bug Fixes
-
-
-1.0.1 (2024-08-04)
-==================
-
-Features
---------
-
-- Added SendFile
-- Added ReceiveFile
-- Migrated to pyproject.toml
-
-
-1.0.0 (2024-08-02)
-==================
-
-Initial release
+- Added support for SSH file transfer using SCP.
+- Enhanced SSHClient with OS detection for file transfer.
