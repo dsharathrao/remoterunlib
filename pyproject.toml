@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "remoterunlib"
-version = "0.1.8"
+version = "0.2"
 description = "remoterunlib is a Python library that facilitates remote command execution"
 readme = "README.md"
 authors = ["Sharath Kumar <dsharathrao@gmail.com>"]
