@@ -1,4 +1,3 @@
-
 # remoterunlib
 
 `remoterunlib` is a Python library that facilitates remote command execution, Python function invocation, and PowerShell command execution over SSH. It is built on top of the Paramiko library and provides a simple interface for managing SSH connections and running commands or functions on remote machines.
@@ -145,6 +144,46 @@ client2 = SSHClient(hostname='remote_host', port=22, username='user', password='
 # client1 and client2 are the same instance
 assert client1 is client2
 ```
+
+#### Running Ansible Playbooks or Ad-hoc Commands
+
+You can use `run_ansible_playbook` to run an Ansible playbook or an ad-hoc command on the remote host. This requires Ansible to be installed on your local (controller) machine.
+
+See example usage in [`demo/Ansible/main.py`](demo/Ansible/main.py).
+
+**Run a playbook:**
+
+```python
+from remoterunlib import SSHClient
+
+client = SSHClient(hostname='remote_host', username='user', password='password')
+client.login()
+
+# Run an Ansible playbook (YAML file)
+client.run_ansible_playbook('site.yml', inventory_file='inventory.ini', out='ansible_output.log', display=True)
+
+client.close()
+```
+
+**Run an ad-hoc command:**
+
+```python
+from remoterunlib import SSHClient
+
+client = SSHClient(hostname='remote_host', username='user', password='password')
+client.login()
+
+# Run an ad-hoc Ansible command (e.g., uptime)
+client.run_ansible_playbook('uptime', inventory_file='inventory.ini', out='adhoc_output.log')
+
+client.close()
+```
+
+- `playbook_or_command`: Path to playbook file (YAML) or ad-hoc command string.
+- `inventory_file`: Path to your Ansible inventory file. If not provided, a temporary inventory is created.
+- `out`: File to save Ansible output.
+- `display`: If True, prints output to console.
+- `extra_vars`: Extra variables for Ansible (optional).
 
 ## Contributing
 

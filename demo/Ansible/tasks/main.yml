@@ -1,0 +1,17 @@
+- name: Display message in a loop
+  ansible.builtin.shell: |
+    for i in {1..10}; do
+      echo "Message $i"
+      sleep 1
+    done
+  register: loop_output
+
+- name: Show loop output
+  ansible.builtin.debug:
+    var: loop_output.stdout_lines
+
+- name: Create a test file
+  copy:
+    content: "Ansible was here!"
+    dest: "/home/labuser/ansible_test.txt"
+  become: true
