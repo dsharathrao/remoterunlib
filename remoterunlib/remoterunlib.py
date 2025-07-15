@@ -1,23 +1,25 @@
 import io
+import platform
+import subprocess
 import sys
 import threading
 import time
 import traceback
 import warnings
-import subprocess
-import platform
+
 from cryptography.utils import CryptographyDeprecationWarning
 
-with warnings.catch_warnings(action="ignore", category=CryptographyDeprecationWarning):
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", CryptographyDeprecationWarning)
     import paramiko
     import paramiko.ssh_exception
 
-from .utils import AuthenticationFailed, SSHException, UnableToConnect, Singleton
+from .utils import AuthenticationFailed, Singleton, SSHException, UnableToConnect
 
 
 class SSHClient(metaclass=Singleton):
     TIMEOUT = 360
-    
+
     def __init__(self, hostname, username, password=None, port=22, key_file=None):
         self.hostname = hostname
         self.port = port
@@ -51,13 +53,17 @@ class SSHClient(metaclass=Singleton):
             print("Connected successfully.")
         except paramiko.AuthenticationException:
             print("Authentication failed.")
-            raise AuthenticationFailed("Authentication failed. Please check credentials.")
+            raise AuthenticationFailed(
+                "Authentication failed. Please check credentials."
+            )
         except paramiko.SSHException as sshException:
             print(f"Unable to establish SSH connection: {sshException}")
             raise SSHException(f"Unable to establish SSH connection: {sshException}")
         except Exception as e:
             print(f"Exception in connecting: {e}")
-            raise UnableToConnect(f"Unable to connect {self.hostname}. Please check correct details")
+            raise UnableToConnect(
+                f"Unable to connect {self.hostname}. Please check correct details"
+            )
 
     def run_command(self, command, timeout=TIMEOUT, verbose=True):
         """Run a command on the remote server with timeout and live output."""
@@ -125,7 +131,6 @@ class SSHClient(metaclass=Singleton):
         else:
             print("Connection not established. Call login() first.")
 
-
     def get_remote_os(self):
         """Detect the remote OS and return as a dict: {'os': 'windows'} or {'os': 'linux'}"""
         if not self.client:
@@ -146,6 +151,7 @@ class SSHClient(metaclass=Singleton):
 
     def send_File(self, file, path=None):
         import os
+
         if self.client:
             try:
                 if not os.path.isfile(file):
@@ -194,17 +200,17 @@ class SSHClient(metaclass=Singleton):
         else:
             print("Connection not established. Call login() first.")
             return None
-        
+
     def receive_File(self, remote_path, local_path):
         """Receive a file from the remote machine to the local machine."""
         if self.client:
             try:
                 print(f"Receiving {remote_path} from remote machine")
                 sftp = self.client.open_sftp()
-                
+
                 # Retrieve the file from the remote machine
                 sftp.get(remote_path, local_path)
-                
+
                 print(f"Received file and saved as: {local_path}")
                 return True
             except Exception as e:
@@ -216,10 +222,8 @@ class SSHClient(metaclass=Singleton):
             print("Connection not established. Call login() first.")
             return None
 
-
     def run_python_file(self, script_file, timeout=TIMEOUT):
         """Run a Python script file on the remote server, using python3 for Linux and python for Windows."""
-        import os
 
         if self.client:
             try:
@@ -269,7 +273,9 @@ class SSHClient(metaclass=Singleton):
                     ps_command = f'pwsh -Command "{command}"'
                     return self.run_command(ps_command, timeout)
                 else:
-                    print("PowerShell (pwsh) is not installed on the remote Linux machine. Please install the PowerShell package.")
+                    print(
+                        "PowerShell (pwsh) is not installed on the remote Linux machine. Please install the PowerShell package."
+                    )
                     return None
             else:
                 print("Unknown remote OS. Cannot run PowerShell command.")
@@ -277,6 +283,169 @@ class SSHClient(metaclass=Singleton):
         except Exception as e:
             print(f"Failed to execute remote PowerShell command: {e}")
             return None
+
+    def run_ansible_playbook(
+        self,
+        playbook_or_command,
+        extra_vars=None,
+        inventory_file=None,
+        out=None,
+        display=True,
+    ):
+        """
+        Runs an Ansible playbook or an ad-hoc command targeting the remote host.
+        Ansible must be installed on the machine running this script.
+        This method only runs on a Linux host.
+
+        Args:
+            playbook_or_command (str): Path to playbook file or ad-hoc command.
+            extra_vars (str, optional): Extra variables for Ansible.
+            inventory_file (str, optional): Path to inventory file. If None, a temporary inventory is created.
+        """
+        if platform.system().lower() != "linux":
+            print("Error: This function can only be run on a Linux system.")
+            return False
+
+        import os
+        import shutil
+        import subprocess
+        import tempfile
+
+        is_playbook = os.path.isfile(playbook_or_command)
+        executable = "ansible-playbook" if is_playbook else "ansible"
+
+        if not shutil.which(executable):
+            print(f"Error: {executable} command not found. Please install Ansible.")
+            return False
+
+        if is_playbook and not os.path.isfile(playbook_or_command):
+            print(f"Error: Playbook file not found at {playbook_or_command}")
+            return False
+
+        temp_inventory_path = None
+        if inventory_file is None:
+            inventory_content = f"{self.hostname} ansible_port={self.port} ansible_user={self.username} ansible_connection=paramiko\n"
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".ini"
+            ) as inv_file:
+                temp_inventory_path = inv_file.name
+                inv_file.write(inventory_content)
+            inventory_path = temp_inventory_path
+        else:
+            inventory_path = inventory_file
+
+        try:
+            if is_playbook:
+                command = [executable, "-i", inventory_path, playbook_or_command]
+            else:
+                # Ad-hoc command
+                if inventory_file is None:
+                    command = [
+                        executable,
+                        self.hostname,
+                        "-i",
+                        inventory_path,
+                        "-m",
+                        "shell",
+                        "-a",
+                        playbook_or_command,
+                    ]
+                else:
+                    command = [
+                        executable,
+                        "all",
+                        "-i",
+                        inventory_path,
+                        "-m",
+                        "shell",
+                        "-a",
+                        playbook_or_command,
+                    ]
+
+            extra_vars_list = []
+            if self.password:
+                extra_vars_list.append(
+                    "ansible_password=****** ansible_become_password=******"
+                )
+            if extra_vars:
+                extra_vars_list.append(extra_vars)
+            if extra_vars_list:
+                command_to_print = command + ["--extra-vars", " ".join(extra_vars_list)]
+            else:
+                command_to_print = command.copy()
+            if self.key_file:
+                command_to_print.extend(["--private-key", self.key_file])
+
+            # Build the real command (with real password) for execution
+            real_extra_vars_list = []
+            if self.password:
+                real_extra_vars_list.append(
+                    f"ansible_password={self.password} ansible_become_password={self.password}"
+                )
+            if extra_vars:
+                real_extra_vars_list.append(extra_vars)
+            real_command = command.copy()
+            if real_extra_vars_list:
+                real_command.extend(["--extra-vars", " ".join(real_extra_vars_list)])
+            if self.key_file:
+                real_command.extend(["--private-key", self.key_file])
+
+            print(f"Running Ansible: {' '.join(command_to_print)}")
+
+            # Set environment for Ansible to use UTF-8 and disable host key checking
+            ansible_env = os.environ.copy()
+            ansible_env["PYTHONIOENCODING"] = "utf-8"
+            ansible_env["ANSIBLE_HOST_KEY_CHECKING"] = "False"
+
+            # Open output file if specified
+            file_handle = None
+            if out is not None:
+                file_handle = open(out, "w", encoding="utf-8")
+
+            try:
+                process = subprocess.Popen(
+                    real_command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=ansible_env,
+                    bufsize=1,
+                )
+
+                if display:
+                    print("--- Ansible Output ---")
+
+                while True:
+                    output = process.stdout.readline()
+                    if output == "" and process.poll() is not None:
+                        break
+                    if output:
+                        if display:
+                            print(output, end="")
+                        if file_handle:
+                            file_handle.write(output)
+
+                stderr_output = process.stderr.read()
+                if stderr_output:
+                    if display:
+                        print("--- Ansible Errors ---")
+                        print(stderr_output)
+                    if file_handle:
+                        file_handle.write("--- Ansible Errors ---\n")
+                        file_handle.write(stderr_output)
+
+                result = process.wait()
+                return result == 0
+            finally:
+                if file_handle:
+                    file_handle.close()
+
+        except Exception as e:
+            print(f"An error occurred while running Ansible: {e}")
+            return False
+        finally:
+            if temp_inventory_path and os.path.exists(temp_inventory_path):
+                os.remove(temp_inventory_path)
 
     def ping(self):
         """Check the connectivity to the remote server by running the ping command locally."""
@@ -288,7 +457,7 @@ class SSHClient(metaclass=Singleton):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                timeout=30
+                timeout=30,
             )
             print(result.stdout)
             if result.returncode == 0:
@@ -323,7 +492,7 @@ class SSHClient(metaclass=Singleton):
             print(f"Unexpected error: {e}")
             print(traceback.format_exc())
         return False
-    
+
     def wait(self, timeout=300, interval=10):
         """Wait until the remote machine is back online after a reboot.
 
@@ -344,13 +513,19 @@ class SSHClient(metaclass=Singleton):
                     port=self.port,
                     username=self.username,
                     password=self.password,
-                    timeout=10
+                    timeout=10,
                 )
                 print("Remote machine is back online.")
                 return True
-            except (TimeoutError, paramiko.ssh_exception.SSHException, paramiko.ssh_exception.NoValidConnectionsError) as e:
+            except (
+                TimeoutError,
+                paramiko.ssh_exception.SSHException,
+                paramiko.ssh_exception.NoValidConnectionsError,
+            ) as e:
                 # If connection failed, wait for the interval period before retrying
-                print(f"Machine is not reachable yet (Error: {e}). Retrying in {interval} seconds...")
+                print(
+                    f"Machine is not reachable yet (Error: {e}). Retrying in {interval} seconds..."
+                )
                 time.sleep(interval)
             except Exception as e:
                 print(f"Unexpected error: {e}")
@@ -368,3 +543,6 @@ class SSHClient(metaclass=Singleton):
         else:
             print("Connection was not established.")
 
+    def __del__(self):
+        """Ensure the SSH connection is closed when the object is deleted."""
+        self.close()
