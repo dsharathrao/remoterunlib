@@ -149,6 +149,33 @@ class SSHClient(metaclass=Singleton):
             print(f"Error detecting remote OS: {e}")
         return {"os": None}
 
+    def get_remote_home(self):
+        """
+        Returns the remote user's home directory as a string, or None on failure.
+        """
+        remote_os = self.get_remote_os().get("os")
+        if remote_os == "windows":
+            # Use PowerShell to get home dir
+            result = self.run_command(
+                'powershell -Command "Write-Output $env:USERPROFILE"', verbose=False
+            )
+            if result and isinstance(result, tuple):
+                out, err = result
+                home = out.strip().splitlines()[0] if out else None
+                if home:
+                    return home
+            # Fallback: try C:\Users\{username}
+            return f"C:\\Users\\{self.username}"
+        elif remote_os == "linux":
+            result = self.run_command("echo $HOME", verbose=False)
+            if result and isinstance(result, tuple):
+                out, err = result
+                home = out.strip().splitlines()[0] if out else None
+                if home:
+                    return home
+            return f"/home/{self.username}"
+        return None
+
     def send_File(self, file, path=None):
         import os
 
@@ -170,17 +197,30 @@ class SSHClient(metaclass=Singleton):
                         remote_script_path = f"{path}/{os.path.basename(file)}"
                     sftp.put(file, remote_script_path)
                 else:
+                    # Use get_remote_home for user-specific temp directory
+                    remote_home = self.get_remote_home()
+                    if not remote_home:
+                        print("Could not determine remote home directory.")
+                        return None
+                    import random
+                    import string
+
+                    rand_str = "".join(
+                        random.choices(string.ascii_letters + string.digits, k=8)
+                    )
+                    temp_dir = os.path.join(remote_home, f".tmp_{rand_str}")
                     if remote_os and remote_os.lower() == "windows":
-                        temp_path = "C:\\temp"
-                        self.run_command(f"mkdir {temp_path}", verbose=False)
+                        ps_cmd = f"powershell -Command \"New-Item -ItemType Directory -Path '{temp_dir}' -Force | Out-Null; Write-Output '{temp_dir}'\""
+                        result = self.run_command(ps_cmd, verbose=False)
+                        if result and isinstance(result, tuple):
+                            out, err = result
+                            temp_path = out.strip().splitlines()[0] if out else temp_dir
+                        else:
+                            temp_path = temp_dir
                         remote_script_path = f"{temp_path}\\{os.path.basename(file)}"
                     elif remote_os and remote_os.lower() == "linux":
-                        # Create temp directory and get its absolute path
-                        out, err = self.run_command("mktemp -d", verbose=False)
-                        temp_path = out.strip()
-                        if not temp_path:
-                            print("Failed to create temp directory on remote Linux.")
-                            return None
+                        self.run_command(f"mkdir -p '{temp_dir}'", verbose=False)
+                        temp_path = temp_dir
                         remote_script_path = f"{temp_path}/{os.path.basename(file)}"
                         print(f"Remote script path: {remote_script_path}")
                     else:
@@ -200,6 +240,82 @@ class SSHClient(metaclass=Singleton):
         else:
             print("Connection not established. Call login() first.")
             return None
+
+    def send_Directory(self, local_dir, remote_path=None):
+        """
+        Recursively send a local directory to the remote host using SFTP.
+        local_dir: path to local directory
+        remote_path: path to remote directory (if None, create temp dir in remote user's home)
+        Returns the remote directory path or None on failure.
+        """
+        import os
+
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return None
+        try:
+            sftp = self.client.open_sftp()
+            remote_os = self.get_remote_os().get("os")
+            if remote_path is None:
+                # Create temp dir in remote user's home directory
+                remote_home = self.get_remote_home()
+                if not remote_home:
+                    print("Could not determine remote home directory.")
+                    return None
+                # Use a unique subdirectory name
+                import random
+                import string
+
+                rand_str = "".join(
+                    random.choices(string.ascii_letters + string.digits, k=8)
+                )
+                base_name = os.path.basename(local_dir.rstrip(os.sep))
+                remote_temp_dir = os.path.join(
+                    remote_home, f".tmp_{base_name}_{rand_str}"
+                )
+                # Create the directory on remote
+                if remote_os == "windows":
+                    # Use PowerShell to create directory and get short path
+                    ps_cmd = f"powershell -Command \"New-Item -ItemType Directory -Path '{remote_temp_dir}' -Force | Out-Null; Write-Output '{remote_temp_dir}'\""
+                    result = self.run_command(ps_cmd, verbose=False)
+                    if result and isinstance(result, tuple):
+                        out, err = result
+                        remote_path = (
+                            out.strip().splitlines()[0] if out else remote_temp_dir
+                        )
+                    else:
+                        remote_path = remote_temp_dir
+                else:
+                    # Linux: mkdir -p
+                    self.run_command(f"mkdir -p '{remote_temp_dir}'", verbose=False)
+                    remote_path = remote_temp_dir
+                print(f"Remote temp directory for transfer: {remote_path}")
+
+            # Recursively create directories and upload files
+            def _recursive_upload(local_path, remote_path):
+                try:
+                    sftp.mkdir(remote_path)
+                except Exception:
+                    pass  # Directory may already exist
+                for item in os.listdir(local_path):
+                    lpath = os.path.join(local_path, item)
+                    rpath = os.path.join(remote_path, item)
+                    if os.path.isdir(lpath):
+                        _recursive_upload(lpath, rpath)
+                    else:
+                        sftp.put(lpath, rpath)
+
+            _recursive_upload(local_dir, remote_path)
+            print(f"Sent directory: {local_dir} to {remote_path}")
+            return remote_path
+        except Exception as e:
+            print(f"Failed to send directory: {e}")
+            return None
+        finally:
+            try:
+                sftp.close()
+            except Exception:
+                pass
 
     def receive_File(self, remote_path, local_path):
         """Receive a file from the remote machine to the local machine."""
@@ -291,6 +407,7 @@ class SSHClient(metaclass=Singleton):
         inventory_file=None,
         out=None,
         display=True,
+        ansible_remote_tmp=None,
     ):
         """
         Runs an Ansible playbook or an ad-hoc command targeting the remote host.
@@ -302,7 +419,8 @@ class SSHClient(metaclass=Singleton):
             extra_vars (str, optional): Extra variables for Ansible.
             inventory_file (str, optional): Path to inventory file. If None, a temporary inventory is created.
         """
-        if platform.system().lower() != "linux":
+        is_local = platform.system().lower() == "linux"
+        if not is_local:
             print("Error: This function can only be run on a Linux system.")
             return False
 
@@ -310,6 +428,10 @@ class SSHClient(metaclass=Singleton):
         import shutil
         import subprocess
         import tempfile
+
+        # Set default remote tmp if not provided
+        if ansible_remote_tmp is None:
+            ansible_remote_tmp = "/tmp"
 
         is_playbook = os.path.isfile(playbook_or_command)
         executable = "ansible-playbook" if is_playbook else "ansible"
@@ -322,9 +444,23 @@ class SSHClient(metaclass=Singleton):
             print(f"Error: Playbook file not found at {playbook_or_command}")
             return False
 
+        # Print whether running locally or remotely (for Ansible, always local in this method)
+        if is_local:
+            print("[Ansible] Running Locally:")
+        else:
+            print("[Ansible] Running Remotely:")
+
         temp_inventory_path = None
         if inventory_file is None:
-            inventory_content = f"{self.hostname} ansible_port={self.port} ansible_user={self.username} ansible_connection=paramiko\n"
+            # Detect remote OS to set correct ansible_connection
+            remote_os = self.get_remote_os().get("os")
+            if remote_os == "windows":
+                inventory_content = (
+                    f"{self.hostname} ansible_port={self.port} ansible_user={self.username} "
+                    f"ansible_connection=winrm ansible_winrm_transport=ntlm ansible_winrm_server_cert_validation=ignore\n"
+                )
+            else:
+                inventory_content = f"{self.hostname} ansible_port={self.port} ansible_user={self.username} ansible_connection=paramiko\n"
             with tempfile.NamedTemporaryFile(
                 mode="w", delete=False, suffix=".ini"
             ) as inv_file:
@@ -339,25 +475,34 @@ class SSHClient(metaclass=Singleton):
                 command = [executable, "-i", inventory_path, playbook_or_command]
             else:
                 # Ad-hoc command
+                remote_os = self.get_remote_os().get("os")
                 if inventory_file is None:
+                    if remote_os == "windows":
+                        module_name = "win_shell"
+                    else:
+                        module_name = "shell"
                     command = [
                         executable,
                         self.hostname,
                         "-i",
                         inventory_path,
                         "-m",
-                        "shell",
+                        module_name,
                         "-a",
                         playbook_or_command,
                     ]
                 else:
+                    if remote_os == "windows":
+                        module_name = "win_shell"
+                    else:
+                        module_name = "shell"
                     command = [
                         executable,
                         "all",
                         "-i",
                         inventory_path,
                         "-m",
-                        "shell",
+                        module_name,
                         "-a",
                         playbook_or_command,
                     ]
@@ -389,6 +534,7 @@ class SSHClient(metaclass=Singleton):
                 real_command.extend(["--extra-vars", " ".join(real_extra_vars_list)])
             if self.key_file:
                 real_command.extend(["--private-key", self.key_file])
+            # Do NOT add --remote-tmp again here
 
             print(f"Running Ansible: {' '.join(command_to_print)}")
 
@@ -396,6 +542,8 @@ class SSHClient(metaclass=Singleton):
             ansible_env = os.environ.copy()
             ansible_env["PYTHONIOENCODING"] = "utf-8"
             ansible_env["ANSIBLE_HOST_KEY_CHECKING"] = "False"
+            if ansible_remote_tmp:
+                ansible_env["ANSIBLE_REMOTE_TMP"] = ansible_remote_tmp
 
             # Open output file if specified
             file_handle = None
@@ -447,6 +595,333 @@ class SSHClient(metaclass=Singleton):
             if temp_inventory_path and os.path.exists(temp_inventory_path):
                 os.remove(temp_inventory_path)
 
+    def run_terraform_init(
+        self, work_dir, backend_config=None, env_vars=None, remote=False
+    ):
+        """
+        Initialize Terraform in the given directory.
+        backend_config: dict of backend config (e.g., AWS/Azure/onprem)
+        env_vars: dict of environment variables
+        remote: if True, run on remote host via SSH; else, run locally
+        """
+        import os
+        import shlex
+        import shutil
+        import subprocess
+
+        tf_cmd = ["terraform", "init", "-lock=false"]
+        # Check if terraform is installed and in PATH
+        if not shutil.which("terraform"):
+            print("Error: Terraform is not installed or not in PATH.")
+            return False
+        if backend_config:
+            for k, v in backend_config.items():
+                tf_cmd.extend(["-backend-config", f"{k}={v}"])
+        env = os.environ.copy()
+        if env_vars:
+            env.update(env_vars)
+        cmd_str = " ".join(shlex.quote(x) for x in tf_cmd)
+        if remote:
+            # Send working dir to remote, run init, optionally fetch .terraform dir back
+            print(f"[Terraform] Running remotely: {cmd_str}")
+            # Use send_Directory for directory transfer
+            remote_dir = (
+                self.send_Directory(work_dir) if os.path.isdir(work_dir) else None
+            )
+            if not remote_dir:
+                print("Failed to send working directory to remote host.")
+                return False
+            remote_cmd = f"cd {remote_dir} && {cmd_str}"
+            result = self.run_command(remote_cmd)
+            if result is None:
+                print("Failed to execute remote command.")
+                return False
+            out, err = result
+            print(out)
+            if err:
+                print(err)
+            return err == ""
+        else:
+            print(f"[Terraform] Running locally: {cmd_str}")
+            proc = subprocess.run(
+                tf_cmd, cwd=work_dir, env=env, capture_output=True, text=True
+            )
+            print(proc.stdout)
+            if proc.stderr:
+                print(proc.stderr)
+            return proc.returncode == 0
+
+    def run_terraform_plan(
+        self,
+        work_dir,
+        var_file=None,
+        vars_dict=None,
+        env_vars=None,
+        out_plan=None,
+        remote=False,
+    ):
+        """
+        Run 'terraform plan' in the given directory.
+        var_file: path to .tfvars file
+        vars_dict: dict of variables to pass
+        env_vars: dict of environment variables
+        out_plan: filename to save the plan output
+        remote: if True, run on remote host via SSH; else, run locally
+        """
+        import os
+        import shlex
+        import shutil
+        import subprocess
+
+        tf_cmd = ["terraform", "plan", "-lock=false"]
+        # Check if terraform is installed and in PATH
+        if not shutil.which("terraform"):
+            print("Error: Terraform is not installed or not in PATH.")
+            return False
+        if var_file:
+            tf_cmd.extend(["-var-file", var_file])
+        if vars_dict:
+            for k, v in vars_dict.items():
+                tf_cmd.extend(["-var", f"{k}={v}"])
+        if out_plan:
+            tf_cmd.extend(["-out", out_plan])
+        env = os.environ.copy()
+        if env_vars:
+            env.update(env_vars)
+        cmd_str = " ".join(shlex.quote(x) for x in tf_cmd)
+        if remote:
+            print(f"[Terraform] Running remotely: {cmd_str}")
+            remote_dir = (
+                self.send_Directory(work_dir) if os.path.isdir(work_dir) else None
+            )
+            if not remote_dir:
+                print("Failed to send working directory to remote host.")
+                return False
+            # Always run remote terraform init before plan
+            init_cmd = "terraform init -lock=false"
+            print(f"[Terraform] Running remote init: {init_cmd}")
+            remote_init_cmd = f"cd {remote_dir} && {init_cmd}"
+            init_result = self.run_command(remote_init_cmd)
+            if init_result is None:
+                print("Remote terraform init failed. Aborting.")
+                return False
+            out, err = (
+                init_result if isinstance(init_result, tuple) else (init_result, "")
+            )
+            print(out)
+            if err:
+                print(err)
+                print("Remote terraform init failed. Aborting.")
+                return False
+            remote_cmd = f"cd {remote_dir} && {cmd_str}"
+            result = self.run_command(remote_cmd)
+            if result is None:
+                print("Failed to execute remote command.")
+                return False
+            out, err = result if isinstance(result, tuple) else (result, "")
+            print(out)
+            if err:
+                print(err)
+            return err == ""
+        else:
+            print(f"[Terraform] Running locally: {cmd_str}")
+            proc = subprocess.run(
+                tf_cmd, cwd=work_dir, env=env, capture_output=True, text=True
+            )
+            print(proc.stdout)
+            if proc.stderr:
+                print(proc.stderr)
+            return proc.returncode == 0
+
+    def run_terraform_apply(
+        self, work_dir, plan_file=None, auto_approve=True, env_vars=None, remote=False
+    ):
+        """
+        Run 'terraform apply' in the given directory.
+        plan_file: path to plan file (optional)
+        auto_approve: if True, pass -auto-approve
+        env_vars: dict of environment variables
+        remote: if True, run on remote host via SSH; else, run locally
+        """
+        import os
+        import shlex
+        import shutil
+        import subprocess
+
+        tf_cmd = ["terraform", "apply", "-lock=false"]
+        # Check if terraform is installed and in PATH
+        if not shutil.which("terraform"):
+            print("Error: Terraform is not installed or not in PATH.")
+            return False
+        # -auto-approve must come before the plan file if plan_file is specified
+        if auto_approve:
+            tf_cmd.append("-auto-approve")
+        if plan_file:
+            tf_cmd.append(plan_file)
+        env = os.environ.copy()
+        if env_vars:
+            env.update(env_vars)
+        cmd_str = " ".join(shlex.quote(x) for x in tf_cmd)
+        if remote:
+            print(f"[Terraform] Running remotely: {cmd_str}")
+            remote_dir = (
+                self.send_Directory(work_dir) if os.path.isdir(work_dir) else None
+            )
+            if not remote_dir:
+                print("Failed to send working directory to remote host.")
+                return False
+            # Always run remote terraform init before apply
+            init_cmd = "terraform init -lock=false"
+            print(f"[Terraform] Running remote init: {init_cmd}")
+            remote_init_cmd = f"cd {remote_dir} && {init_cmd}"
+            init_result = self.run_command(remote_init_cmd)
+            if init_result is None:
+                print("Remote terraform init failed. Aborting.")
+                return False
+            out, err = (
+                init_result if isinstance(init_result, tuple) else (init_result, "")
+            )
+            print(out)
+            if err:
+                print(err)
+                print("Remote terraform init failed. Aborting.")
+                return False
+            remote_cmd = f"cd {remote_dir} && {cmd_str}"
+            result = self.run_command(remote_cmd)
+            if result is None:
+                print("Failed to execute remote command.")
+                return False
+            out, err = result if isinstance(result, tuple) else (result, "")
+            print(out)
+            if err:
+                print(err)
+            return err == ""
+        else:
+            print(f"[Terraform] Running locally: {cmd_str}")
+            proc = subprocess.run(
+                tf_cmd, cwd=work_dir, env=env, capture_output=True, text=True
+            )
+            print(proc.stdout)
+            if proc.stderr:
+                print(proc.stderr)
+            return proc.returncode == 0
+
+    def run_terraform(self, work_dir, command_args, env_vars=None, remote=False):
+        """
+        Run a custom Terraform command in the given directory.
+        command_args: list of terraform CLI arguments (e.g., ["state", "list"])
+        env_vars: dict of environment variables
+        remote: if True, run on remote host via SSH; else, run locally
+        """
+        import os
+        import shlex
+        import shutil
+        import subprocess
+
+        # Only add -lock=false for commands that support it
+        lock_supported = {"init", "plan", "apply", "import", "destroy"}
+        tf_cmd = ["terraform"] + command_args
+        if command_args and command_args[0] in lock_supported:
+            tf_cmd.append("-lock=false")
+        # Check if terraform is installed and in PATH
+        if not shutil.which("terraform"):
+            print("Error: Terraform is not installed or not in PATH.")
+            return False
+        env = os.environ.copy()
+        if env_vars:
+            env.update(env_vars)
+        cmd_str = " ".join(shlex.quote(x) for x in tf_cmd)
+        if remote:
+            print(f"[Terraform] Running remotely: {cmd_str}")
+            remote_dir = (
+                self.send_Directory(work_dir) if os.path.isdir(work_dir) else None
+            )
+            if not remote_dir:
+                print("Failed to send working directory to remote host.")
+                return False
+            remote_cmd = f"cd {remote_dir} && {cmd_str}"
+            result = self.run_command(remote_cmd)
+            if result is None:
+                print("Failed to execute remote command.")
+                return False
+            out, err = result if isinstance(result, tuple) else (result, "")
+            print(out)
+            if err:
+                print(err)
+            return err == ""
+        else:
+            print(f"[Terraform] Running locally: {cmd_str}")
+            proc = subprocess.run(
+                tf_cmd, cwd=work_dir, env=env, capture_output=True, text=True
+            )
+            print(proc.stdout)
+            if proc.stderr:
+                print(proc.stderr)
+            return proc.returncode == 0
+
+    def run_terraform_import(
+        self, work_dir, resource, resource_id, env_vars=None, remote=False
+    ):
+        """
+        Run 'terraform import' to import existing infrastructure into Terraform state.
+        resource: resource address (e.g., aws_instance.example)
+        resource_id: ID of the resource to import
+        env_vars: dict of environment variables
+        remote: if True, run on remote host via SSH; else, run locally
+        """
+        import os
+        import shlex
+        import subprocess
+
+        tf_cmd = ["terraform", "import", "-lock=false", resource, resource_id]
+        env = os.environ.copy()
+        if env_vars:
+            env.update(env_vars)
+        cmd_str = " ".join(shlex.quote(x) for x in tf_cmd)
+        if remote:
+            print(f"[Terraform] Running remotely: {cmd_str}")
+            remote_dir = (
+                self.send_Directory(work_dir) if os.path.isdir(work_dir) else None
+            )
+            if not remote_dir:
+                print("Failed to send working directory to remote host.")
+                return False
+            # Always run remote terraform init before import
+            init_cmd = "terraform init -lock=false"
+            print(f"[Terraform] Running remote init: {init_cmd}")
+            remote_init_cmd = f"cd {remote_dir} && {init_cmd}"
+            init_result = self.run_command(remote_init_cmd)
+            if init_result is None:
+                print("Remote terraform init failed. Aborting.")
+                return False
+            out, err = (
+                init_result if isinstance(init_result, tuple) else (init_result, "")
+            )
+            print(out)
+            if err:
+                print(err)
+                print("Remote terraform init failed. Aborting.")
+                return False
+            remote_cmd = f"cd {remote_dir} && {cmd_str}"
+            result = self.run_command(remote_cmd)
+            if result is None:
+                print("Failed to execute remote command.")
+                return False
+            out, err = result if isinstance(result, tuple) else (result, "")
+            print(out)
+            if err:
+                print(err)
+            return err == ""
+        else:
+            print(f"[Terraform] Running locally: {cmd_str}")
+            proc = subprocess.run(
+                tf_cmd, cwd=work_dir, env=env, capture_output=True, text=True
+            )
+            print(proc.stdout)
+            if proc.stderr:
+                print(proc.stderr)
+            return proc.returncode == 0
+
     def ping(self):
         """Check the connectivity to the remote server by running the ping command locally."""
 
@@ -484,7 +959,11 @@ class SSHClient(metaclass=Singleton):
                 print("Unknown remote OS. Cannot determine reboot command.")
                 return False
 
-            out, err = self.run_command(reboot_cmd, verbose=False)
+            result = self.run_command(reboot_cmd, verbose=False)
+            if result is None:
+                print("Failed to execute reboot command.")
+                return False
+            out, err = result if isinstance(result, tuple) else (result, "")
             time.sleep(20)
             self.wait(timeout=wait_until)
             return not err
