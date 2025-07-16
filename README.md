@@ -187,7 +187,7 @@ You can use `SSHClient` to automate Terraform workflows, both locally and on a r
 ```python
 from remoterunlib import SSHClient
 
-client = SSHClient(hostname='192.168.0.105', username='sharath', password='wipro@11')
+client = SSHClient(hostname='192.168.0.105', username='sharath', password='')
 client.login()
 
 # --- Terraform Examples ---

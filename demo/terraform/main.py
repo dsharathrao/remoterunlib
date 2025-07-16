@@ -1,7 +1,7 @@
 from remoterunlib import SSHClient
 
 
-client = SSHClient(hostname='192.168.0.105', username='sharath', password='wipro@11')
+client = SSHClient(hostname='192.168.0.105', username='sharath', password='')
 
 client.login()
 
