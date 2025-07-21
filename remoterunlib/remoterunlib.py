@@ -17,7 +17,7 @@ with warnings.catch_warnings():
 from .utils import AuthenticationFailed, Singleton, SSHException, UnableToConnect
 
 
-class SSHClient(metaclass=Singleton):
+class SSHClient:
     TIMEOUT = 360
 
     def __init__(self, hostname, username, password=None, port=22, key_file=None):
@@ -71,14 +71,16 @@ class SSHClient(metaclass=Singleton):
             try:
                 if verbose:
                     sys.stdout = sys.__stdout__
+                    sys.stderr = sys.__stderr__
                 else:
                     sys.stdout = io.StringIO()
+                    sys.stderr = io.StringIO()
 
                 def target():
                     nonlocal output, errors
                     try:
                         print(f"\nRun_Command: {command}")
-                        stdin, stdout, stderr = self.client.exec_command(command)
+                        _, stdout, stderr = self.client.exec_command(command)
                         start_time = time.time()
                         while not stdout.channel.exit_status_ready():
                             if time.time() - start_time > timeout:
@@ -124,8 +126,8 @@ class SSHClient(metaclass=Singleton):
 
                 return output, errors
             except Exception as why:
-                print("Got exception while running cmd: ")
-                print(f"Exception: {why}")
+                print(f"Error running command: {why}")
+                return None, str(why)
             finally:
                 sys.stdout = sys.__stdout__
         else:
@@ -340,14 +342,13 @@ class SSHClient(metaclass=Singleton):
 
     def run_python_file(self, script_file, timeout=TIMEOUT):
         """Run a Python script file on the remote server, using python3 for Linux and python for Windows."""
-
         if self.client:
             try:
                 remote_script_path = self.send_File(script_file)
                 print(f"Running remote script: {remote_script_path}")
                 if not remote_script_path:
                     print("Failed to send script file to remote machine.")
-                    return False
+                    return None, "Failed to send script file"
 
                 remote_os = self.get_remote_os().get("os")
                 if remote_os == "linux":
@@ -356,20 +357,19 @@ class SSHClient(metaclass=Singleton):
                     remote_command = f"python {remote_script_path}"
                 else:
                     print("Unknown remote OS. Cannot determine Python interpreter.")
-                    return False
+                    return None, "Unknown remote OS"
 
                 output, errors = self.run_command(remote_command, timeout=timeout)
                 if errors:
                     print("Errors while executing remote function:")
                     print(errors)
-                return True
-
+                return output, errors
             except Exception as e:
                 print(f"Failed to execute remote function: {e}")
-                return False
+                return None, str(e)
         else:
             print("Connection not established. Call login() first.")
-            return None
+            return None, "Not connected"
 
     def run_powershell_command(self, command, timeout=360):
         """Run a PowerShell command on the remote server."""
@@ -421,8 +421,12 @@ class SSHClient(metaclass=Singleton):
         """
         is_local = platform.system().lower() == "linux"
         if not is_local:
-            print("Error: This function can only be run on a Linux system.")
-            return False
+            error_msg = (
+                "Operation not permitted: Ansible execution is only supported on Linux-based control nodes. "
+                "Please ensure that the host machine is running a supported Linux distribution to use this feature."
+            )
+            print(error_msg)
+            return {"success": False, "output": "", "error": error_msg}
 
         import os
         import shutil
@@ -437,12 +441,14 @@ class SSHClient(metaclass=Singleton):
         executable = "ansible-playbook" if is_playbook else "ansible"
 
         if not shutil.which(executable):
-            print(f"Error: {executable} command not found. Please install Ansible.")
-            return False
+            error_msg = f"Error: {executable} command not found. Please install Ansible."
+            print(error_msg)
+            return {"success": False, "output": "", "error": error_msg}
 
         if is_playbook and not os.path.isfile(playbook_or_command):
-            print(f"Error: Playbook file not found at {playbook_or_command}")
-            return False
+            error_msg = f"Error: Playbook file not found at {playbook_or_command}"
+            print(error_msg)
+            return {"success": False, "output": "", "error": error_msg}
 
         # Print whether running locally or remotely (for Ansible, always local in this method)
         if is_local:
@@ -550,6 +556,8 @@ class SSHClient(metaclass=Singleton):
             if out is not None:
                 file_handle = open(out, "w", encoding="utf-8")
 
+            output_buffer = ""
+            error_buffer = ""
             try:
                 process = subprocess.Popen(
                     real_command,
@@ -568,6 +576,7 @@ class SSHClient(metaclass=Singleton):
                     if output == "" and process.poll() is not None:
                         break
                     if output:
+                        output_buffer += output
                         if display:
                             print(output, end="")
                         if file_handle:
@@ -575,6 +584,7 @@ class SSHClient(metaclass=Singleton):
 
                 stderr_output = process.stderr.read()
                 if stderr_output:
+                    error_buffer += stderr_output
                     if display:
                         print("--- Ansible Errors ---")
                         print(stderr_output)
@@ -583,14 +593,16 @@ class SSHClient(metaclass=Singleton):
                         file_handle.write(stderr_output)
 
                 result = process.wait()
-                return result == 0
+                success = result == 0
+                return {"success": success, "output": output_buffer, "error": error_buffer}
             finally:
                 if file_handle:
                     file_handle.close()
 
         except Exception as e:
-            print(f"An error occurred while running Ansible: {e}")
-            return False
+            error_msg = f"An error occurred while running Ansible: {e}"
+            print(error_msg)
+            return {"success": False, "output": "", "error": error_msg}
         finally:
             if temp_inventory_path and os.path.exists(temp_inventory_path):
                 os.remove(temp_inventory_path)
@@ -806,7 +818,9 @@ class SSHClient(metaclass=Singleton):
                 print(proc.stderr)
             return proc.returncode == 0
 
-    def run_terraform(self, work_dir, command_args, env_vars=None, remote=False):
+    def run_terraform(
+        self, work_dir, command_args, env_vars=None, remote=False
+    ):
         """
         Run a custom Terraform command in the given directory.
         command_args: list of terraform CLI arguments (e.g., ["state", "list"])

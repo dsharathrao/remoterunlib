@@ -6,13 +6,15 @@
 
 Windows : [openssh_install](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse?tabs=powershell)
 
+
 ## Features
 
 - **SSH Connection Management**: Easily manage SSH connections with support for password and key-based authentication.
 - **Remote Command Execution**: Run shell commands on remote machines.
 - **Remote Python Function Invocation**: Serialize and execute Python functions remotely.
 - **PowerShell Command Execution**: Execute PowerShell commands on remote Windows machines.
-- **Remote machine Restart**: Restart the remote machine
+-- **Remote machine Restart**: Restart the remote machine
+- **Web Dashboard**: Manage remote machines and execute commands via a Flask-based web dashboard with REST API and WebSocket support.
 ## Installation
 
 Install the package using pip:
@@ -115,6 +117,40 @@ ssh_client.reboot(wait_until=300) # wait until 300 seconds
 # Close the SSH connection
 client.close()
 ```
+
+
+### Dashboard API Server
+
+You can launch a web-based dashboard to manage remote machines, execute commands, run Python scripts, Ansible, and Terraform, all from a browser UI.
+
+#### Quick Start
+
+```python
+from remoterunlib import Dashboard
+
+client = Dashboard(host='localhost', port=8000)
+client.serve()
+```
+
+This will start a Flask server at `http://localhost:8000` with a web UI and REST API. You can add machines, run commands, scripts, and more from the browser.
+
+See [`demo/dashboard_example.py`](demo/dashboard_example.py) for a minimal example.
+
+#### API Endpoints
+
+- `GET /api/machines` — List all machines
+- `POST /api/machines` — Add a new machine
+- `PUT /api/machines/<machine_id>` — Update a machine
+- `DELETE /api/machines/<machine_id>` — Delete a machine
+- `POST /api/execute-command` — Execute a shell command on a machine
+- `POST /api/run-python` — Run a Python script on a machine
+- `POST /api/run-ansible` — Run an Ansible playbook or ad-hoc command
+- `POST /api/run-terraform` — Run Terraform plan/apply/destroy
+- `POST /api/ping-machine` — Ping a machine by ID
+
+The dashboard also provides a web UI at `/` and supports live logs via WebSocket (`/ws`).
+
+---
 
 ### Advanced Usage
 
