@@ -1,16 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RemoteRunLib Dashboard</title>
     <!-- FontAwesome CDN for icons -->
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"
+        crossorigin="anonymous">
     <!-- Socket.IO client for live logs -->
-    
+
     <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
     <div class="app-container">
         <!-- Sidebar Navigation -->
@@ -19,7 +22,11 @@
                 <h2><i class="fas fa-server"></i> RemoteRunLib</h2>
             </div>
             <ul class="nav-menu">
-                <li class="nav-item active" data-section="machines">
+                <li class="nav-item active" data-section="dashboard">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>Dashboard</span>
+                </li>
+                <li class="nav-item" data-section="machines">
                     <i class="fas fa-desktop"></i>
                     <span>Machines</span>
                 </li>
@@ -46,16 +53,111 @@
         <main class="main-content">
             <!-- Header -->
             <header class="header">
-                <h1 id="page-title">Machine Management</h1>
+                <h1 id="page-title">Dashboard</h1>
                 <div class="header-actions">
-                    <button class="btn btn-primary" id="add-machine-btn">
-                        <i class="fas fa-plus"></i> Add Machine
-                    </button>
+                    <!-- Dynamic header actions will be populated here -->
                 </div>
             </header>
 
+            <!-- Dashboard Section -->
+            <section id="dashboard-section" class="content-section active">
+                <div class="dashboard-container">
+                    <!-- Dashboard Stats -->
+                    <div class="dashboard-stats">
+                        <div class="stat-card">
+                            <div class="stat-icon success">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="successful-executions">0</h3>
+                                <p>Successful Executions</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon error">
+                                <i class="fas fa-times-circle"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="failed-executions">0</h3>
+                                <p>Failed Executions</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon info">
+                                <i class="fas fa-server"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="active-machines">0</h3>
+                                <p>Active Machines</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon warning">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="recent-executions">0</h3>
+                                <p>Last 24h Executions</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Filters and Controls -->
+                    <div class="dashboard-controls">
+                        <div class="filter-group">
+                            <label for="machine-filter">Filter by Machine:</label>
+                            <select id="machine-filter" class="form-control">
+                                <option value="">All Machines</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="type-filter">Filter by Type:</label>
+                            <select id="type-filter" class="form-control">
+                                <option value="">All Types</option>
+                                <option value="command">Commands</option>
+                                <option value="python">Python Scripts</option>
+                                <option value="ansible">Ansible Playbooks</option>
+                                <option value="terraform">Terraform</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="status-filter">Filter by Status:</label>
+                            <select id="status-filter" class="form-control">
+                                <option value="">All Status</option>
+                                <option value="success">Success</option>
+                                <option value="failed">Failed</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <button class="btn btn-secondary" id="refresh-dashboard-btn">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Execution History -->
+                    <div class="execution-history">
+                        <div class="history-header">
+                            <h3><i class="fas fa-history"></i> Execution History</h3>
+                            <div class="history-controls">
+                                <button class="btn btn-sm btn-secondary" id="clear-history-btn">
+                                    <i class="fas fa-trash"></i> Clear History
+                                </button>
+                            </div>
+                        </div>
+                        <div class="execution-list" id="execution-list">
+                            <!-- Execution items will be populated here -->
+                            <div class="empty-state">
+                                <i class="fas fa-inbox"></i>
+                                <p>No executions found</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <!-- Machines Section -->
-            <section id="machines-section" class="content-section active">
+            <section id="machines-section" class="content-section">
                 <div class="machines-grid" id="machines-grid">
                     <!-- Machine cards will be populated here -->
                 </div>
@@ -72,7 +174,8 @@
                     </div>
                     <div class="form-group">
                         <label for="command-input">Command:</label>
-                        <textarea id="command-input" class="form-control" placeholder="Enter command to execute..." rows="3"></textarea>
+                        <textarea id="command-input" class="form-control" placeholder="Enter command to execute..."
+                            rows="3"></textarea>
                     </div>
                     <div class="form-group">
                         <label for="command-timeout">Timeout (seconds):</label>
@@ -128,17 +231,22 @@
                                             </div>
                                         </div>
                                         <div class="editor-controls">
-                                            <button class="editor-btn" title="Format Code"><i class="fas fa-magic"></i></button>
-                                            <button class="editor-btn" title="Find & Replace"><i class="fas fa-search"></i></button>
+                                            <button class="editor-btn" title="Format Code"><i
+                                                    class="fas fa-magic"></i></button>
+                                            <button class="editor-btn" title="Find & Replace"><i
+                                                    class="fas fa-search"></i></button>
                                         </div>
                                     </div>
                                     <div class="code-editor-wrapper">
                                         <div class="line-numbers" id="python-line-numbers"></div>
-                                        <textarea id="python-editor" class="code-editor" placeholder="# Write your Python script here..." spellcheck="false"></textarea>
+                                        <textarea id="python-editor" class="code-editor"
+                                            placeholder="# Write your Python script here..."
+                                            spellcheck="false"></textarea>
                                     </div>
                                 </div>
                                 <div class="editor-actions">
-                                    <input type="text" id="python-filename" class="form-control" placeholder="script_name.py">
+                                    <input type="text" id="python-filename" class="form-control"
+                                        placeholder="script_name.py">
                                     <button class="btn btn-primary" id="save-python-btn">
                                         <i class="fas fa-save"></i> Save
                                     </button>
@@ -174,8 +282,8 @@
                         <div class="form-group">
                             <label for="ansible-module">Module:</label>
                             <select id="ansible-module" class="form-control">
-                                <option value="shell">shell</option>
                                 <option value="command">command</option>
+                                <option value="shell">shell</option>
                                 <option value="copy">copy</option>
                                 <option value="file">file</option>
                                 <option value="service">service</option>
@@ -185,7 +293,8 @@
                         </div>
                         <div class="form-group">
                             <label for="ansible-args">Arguments:</label>
-                            <textarea id="ansible-args" class="form-control" placeholder="Module arguments..." rows="3"></textarea>
+                            <textarea id="ansible-args" class="form-control" placeholder="Module arguments..."
+                                rows="3"></textarea>
                         </div>
                     </div>
                     <div id="playbook-mode" class="mode-content">
@@ -219,17 +328,22 @@
                                                 </div>
                                             </div>
                                             <div class="editor-controls">
-                                                <button class="editor-btn" title="Format YAML"><i class="fas fa-magic"></i></button>
-                                                <button class="editor-btn" title="Validate YAML"><i class="fas fa-check"></i></button>
+                                                <button class="editor-btn" title="Format YAML"><i
+                                                        class="fas fa-magic"></i></button>
+                                                <button class="editor-btn" title="Validate YAML"><i
+                                                        class="fas fa-check"></i></button>
                                             </div>
                                         </div>
                                         <div class="code-editor-wrapper">
                                             <div class="line-numbers" id="ansible-line-numbers"></div>
-                                            <textarea id="ansible-editor" class="code-editor" placeholder="# Write your Ansible playbook YAML here..." spellcheck="false"></textarea>
+                                            <textarea id="ansible-editor" class="code-editor"
+                                                placeholder="# Write your Ansible playbook YAML here..."
+                                                spellcheck="false"></textarea>
                                         </div>
                                     </div>
                                     <div class="editor-actions">
-                                        <input type="text" id="ansible-filename" class="form-control" placeholder="playbook.yml">
+                                        <input type="text" id="ansible-filename" class="form-control"
+                                            placeholder="playbook.yml">
                                         <button class="btn btn-primary" id="save-ansible-editor-btn">
                                             <i class="fas fa-save"></i> Save
                                         </button>
@@ -288,17 +402,22 @@
                                             </div>
                                         </div>
                                         <div class="editor-controls">
-                                            <button class="editor-btn" title="Format HCL"><i class="fas fa-magic"></i></button>
-                                            <button class="editor-btn" title="Validate Config"><i class="fas fa-check"></i></button>
+                                            <button class="editor-btn" title="Format HCL"><i
+                                                    class="fas fa-magic"></i></button>
+                                            <button class="editor-btn" title="Validate Config"><i
+                                                    class="fas fa-check"></i></button>
                                         </div>
                                     </div>
                                     <div class="code-editor-wrapper">
                                         <div class="line-numbers" id="terraform-line-numbers"></div>
-                                        <textarea id="terraform-editor" class="code-editor" placeholder="# Write your Terraform configuration here..." spellcheck="false"></textarea>
+                                        <textarea id="terraform-editor" class="code-editor"
+                                            placeholder="# Write your Terraform configuration here..."
+                                            spellcheck="false"></textarea>
                                     </div>
                                 </div>
                                 <div class="editor-actions">
-                                    <input type="text" id="terraform-filename" class="form-control" placeholder="main.tf">
+                                    <input type="text" id="terraform-filename" class="form-control"
+                                        placeholder="main.tf">
                                     <button class="btn btn-primary" id="save-terraform-btn">
                                         <i class="fas fa-save"></i> Save
                                     </button>
@@ -335,7 +454,8 @@
                     <button class="btn btn-sm btn-secondary" id="maximize-logs-btn" title="Maximize">
                         <i class="fas fa-expand"></i>
                     </button>
-                    <button class="btn btn-sm btn-secondary" id="minimize-logs-btn" title="Minimize" style="display: none;">
+                    <button class="btn btn-sm btn-secondary" id="minimize-logs-btn" title="Minimize"
+                        style="display: none;">
                         <i class="fas fa-compress"></i>
                     </button>
                     <button class="btn btn-sm btn-secondary" id="toggle-logs-btn" title="Collapse">
@@ -405,6 +525,76 @@
         </div>
     </div>
 
+    <!-- Execution Details Modal -->
+    <div class="modal" id="execution-details-modal">
+        <div class="modal-content execution-modal">
+            <div class="modal-header">
+                <h3 id="execution-modal-title">Execution Details</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="execution-details">
+                    <div class="detail-section">
+                        <h4><i class="fas fa-info-circle"></i> Execution Info</h4>
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <label>Machine:</label>
+                                <span id="detail-machine"></span>
+                            </div>
+                            <div class="detail-item">
+                                <label>Type:</label>
+                                <span id="detail-type"></span>
+                            </div>
+                            <div class="detail-item">
+                                <label>Status:</label>
+                                <span id="detail-status"></span>
+                            </div>
+                            <div class="detail-item">
+                                <label>Duration:</label>
+                                <span id="detail-duration"></span>
+                            </div>
+                            <div class="detail-item">
+                                <label>Started:</label>
+                                <span id="detail-started"></span>
+                            </div>
+                            <div class="detail-item">
+                                <label>Completed:</label>
+                                <span id="detail-completed"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="detail-section">
+                        <h4><i class="fas fa-code"></i> Command/Script</h4>
+                        <div class="code-display">
+                            <pre id="detail-command"></pre>
+                        </div>
+                    </div>
+
+                    <div class="detail-section">
+                        <h4><i class="fas fa-terminal"></i> Output</h4>
+                        <div class="output-display">
+                            <pre id="detail-output"></pre>
+                        </div>
+                    </div>
+
+                    <div class="detail-section">
+                        <h4><i class="fas fa-list-alt"></i> Logs</h4>
+                        <div class="logs-display">
+                            <div id="detail-logs"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="close-execution-details-btn">Close</button>
+                <!-- <button class="btn btn-primary" id="rerun-execution-btn">
+                    <i class="fas fa-redo"></i> Re-run
+                </button> -->
+            </div>
+        </div>
+    </div>
+
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loading-overlay">
         <div class="loading-spinner">
@@ -415,4 +605,5 @@
 
     <script src="script.js" defer></script>
 </body>
+
 </html>

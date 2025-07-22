@@ -6,6 +6,12 @@ class RemoteRunApp {
         this.websocket = null;
         this.socket = null;
         this.editors = {};
+        // Dashboard state
+        this.dashboardFilters = {
+            machine_id: '',
+            type: '',
+            status: ''
+        };
         this.init();
     }
 
@@ -18,6 +24,298 @@ class RemoteRunApp {
         this.setupTabs();
         this.setupCodeEditors();
         this.startPingInterval();
+
+        // Add event listener for Execute Command button
+        const execBtn = document.getElementById('execute-command-btn');
+        if (execBtn) {
+            execBtn.addEventListener('click', () => this.executeCommand());
+        }
+
+        // Add event listener for Run Python button (ensure only one handler)
+        const runPythonBtn = document.getElementById('run-python-btn');
+        if (runPythonBtn) {
+            runPythonBtn.onclick = null;
+            runPythonBtn.addEventListener('click', () => this.runPythonScript());
+        }
+
+        // Add event listener for Save Python button
+        const savePythonBtn = document.getElementById('save-python-btn');
+        if (savePythonBtn) {
+            savePythonBtn.onclick = null;
+            savePythonBtn.addEventListener('click', () => this.savePythonScript());
+        }
+
+        // Add event listener for Run Ansible button (ensure only one handler)
+        const runAnsibleBtn = document.getElementById('run-ansible-btn');
+        if (runAnsibleBtn) {
+            runAnsibleBtn.onclick = null;
+            runAnsibleBtn.addEventListener('click', () => this.runAnsible());
+        }
+
+        // Add event listener for Save Ansible button
+        const saveAnsibleBtn = document.getElementById('save-ansible-btn');
+        if (saveAnsibleBtn) {
+            saveAnsibleBtn.onclick = null;
+            saveAnsibleBtn.addEventListener('click', () => this.saveAnsibleScript());
+        }
+
+        // Add event listener for Save Terraform button
+        const saveTerraformBtn = document.getElementById('save-terraform-btn');
+        if (saveTerraformBtn) {
+            saveTerraformBtn.onclick = null;
+            saveTerraformBtn.addEventListener('click', () => this.saveTerraformScript());
+        }
+
+        // Add event listeners for Clear buttons
+        const clearCommandBtn = document.getElementById('clear-command-btn');
+        if (clearCommandBtn) {
+            clearCommandBtn.addEventListener('click', () => this.clearCommand());
+        }
+
+        const clearPythonBtn = document.getElementById('clear-python-btn');
+        if (clearPythonBtn) {
+            clearPythonBtn.addEventListener('click', () => this.clearPython());
+        }
+
+        const clearTerraformBtn = document.getElementById('clear-terraform-btn');
+        if (clearTerraformBtn) {
+            clearTerraformBtn.addEventListener('click', () => this.clearTerraform());
+        }
+
+        // Add event listeners for Terraform action buttons
+        const terraformPlanBtn = document.getElementById('terraform-plan-btn');
+        if (terraformPlanBtn) {
+            terraformPlanBtn.addEventListener('click', () => this.runTerraform('plan'));
+        }
+
+        const terraformApplyBtn = document.getElementById('terraform-apply-btn');
+        if (terraformApplyBtn) {
+            terraformApplyBtn.addEventListener('click', () => this.runTerraform('apply'));
+        }
+
+        const terraformDestroyBtn = document.getElementById('terraform-destroy-btn');
+        if (terraformDestroyBtn) {
+            terraformDestroyBtn.addEventListener('click', () => this.runTerraform('destroy'));
+        }
+
+        // Fix: Add event listeners for Ansible mode toggle buttons
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+                e.currentTarget.classList.add('active');
+                document.querySelectorAll('.mode-content').forEach(content => content.classList.remove('active'));
+                const mode = e.currentTarget.dataset.mode;
+                document.getElementById(`${mode}-mode`).classList.add('active');
+            });
+        });
+
+        // Load existing files on startup
+        this.loadExistingFiles('python');
+        this.loadExistingFiles('ansible');
+        this.loadExistingFiles('terraform');
+
+        // Dashboard
+        this.initDashboard();
+
+        // Modal close for execution details
+        document.getElementById('close-execution-details-btn').addEventListener('click', () => {
+            this.hideModal('execution-details-modal');
+        });
+
+        // Save Machine button event (for add new)
+        const saveBtn = document.getElementById('save-machine-btn');
+        if (saveBtn) {
+            saveBtn.textContent = 'Save Machine';
+            saveBtn.onclick = () => this.saveMachine();
+            this._saveMachineHandler = saveBtn.onclick;
+        }
+
+        // Fix: Add event listener for Test Connection button in modal
+        const testBtn = document.getElementById('test-connection-btn');
+        if (testBtn) {
+            // Remove any previous event listeners to avoid stacking
+            testBtn.onclick = null;
+            testBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                // Always use the machine-id from the modal form
+                const machineId = document.getElementById('machine-id').value;
+                if (!machineId) {
+                    alert('Please fill in the machine details and save first.');
+                    return;
+                }
+                // Call testMachineConnection with the correct id
+                this.testMachineConnection(machineId);
+            });
+        }
+    }
+    // --- Dashboard logic ---
+    initDashboard() {
+        // Initial load
+        this.loadDashboardStats();
+        this.loadDashboardHistory();
+        // Populate machine filter
+        this.populateDashboardMachineFilter();
+        // Filter change listeners
+        document.getElementById('machine-filter').addEventListener('change', (e) => {
+            this.dashboardFilters.machine_id = e.target.value;
+            this.loadDashboardHistory();
+        });
+        document.getElementById('type-filter').addEventListener('change', (e) => {
+            this.dashboardFilters.type = e.target.value;
+            this.loadDashboardHistory();
+        });
+        document.getElementById('status-filter').addEventListener('change', (e) => {
+            this.dashboardFilters.status = e.target.value;
+            this.loadDashboardHistory();
+        });
+        document.getElementById('refresh-dashboard-btn').addEventListener('click', () => {
+            this.loadDashboardStats();
+            this.loadDashboardHistory();
+        });
+        document.getElementById('clear-history-btn').addEventListener('click', () => {
+            if (confirm('Clear all execution history?')) {
+                this.clearExecutionHistory();
+            }
+        });
+    }
+
+    async loadDashboardStats() {
+        try {
+            const res = await fetch('/api/execution-stats');
+            if (!res.ok) return;
+            const stats = await res.json();
+            document.getElementById('successful-executions').textContent = stats.successful_executions || 0;
+            document.getElementById('failed-executions').textContent = stats.failed_executions || 0;
+            document.getElementById('active-machines').textContent = stats.active_machines || 0;
+            document.getElementById('recent-executions').textContent = stats.recent_executions || 0;
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    async loadDashboardHistory() {
+        const params = [];
+        if (this.dashboardFilters.machine_id) params.push('machine_id=' + encodeURIComponent(this.dashboardFilters.machine_id));
+        if (this.dashboardFilters.type) params.push('type=' + encodeURIComponent(this.dashboardFilters.type));
+        if (this.dashboardFilters.status) params.push('status=' + encodeURIComponent(this.dashboardFilters.status));
+        // Always show last 24h by default
+        params.push('last_24h=1');
+        const url = '/api/execution-history' + (params.length ? '?' + params.join('&') : '');
+        try {
+            const res = await fetch(url);
+            if (!res.ok) return;
+            const history = await res.json();
+            this.renderDashboardHistory(history);
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    renderDashboardHistory(history) {
+        const list = document.getElementById('execution-list');
+        list.innerHTML = '';
+        if (!history || !history.length) {
+            list.innerHTML = `<div class="empty-state"><i class="fas fa-inbox"></i><p>No executions found</p></div>`;
+            return;
+        }
+        for (const item of history) {
+            const div = document.createElement('div');
+            div.className = 'execution-item';
+            div.innerHTML = `
+                <div class="execution-status ${item.status === 'success' ? 'success' : (item.status === 'failed' ? 'failed' : 'running')}"></div>
+                <div class="execution-info">
+                    <div class="execution-main">
+                        <div class="execution-title">${item.command ? item.command.substring(0, 40) : ''}</div>
+                        <div class="execution-subtitle">${item.machine_id || ''} <span class="machine-host"></span></div>
+                    </div>
+                    <div class="execution-type ${item.type}">${item.type || ''}</div>
+                    <div class="execution-duration">${item.duration ? item.duration.toFixed(1) + 's' : ''}</div>
+                    <div class="execution-time">${item.started_at ? this.formatDate(item.started_at) : ''}</div>
+                    <div class="execution-time">${item.status || ''}</div>
+                </div>
+            `;
+            // Store execution id for click
+            div.dataset.execId = item.id;
+            // Fetch and show machine host
+            const machine = this.machines.find(m => m.id === item.machine_id);
+            if (machine) {
+                div.querySelector('.machine-host').innerHTML = `<b>(${machine.host})</b>`;
+            }
+            // Click to show details modal
+            div.addEventListener('click', () => this.showExecutionDetails(item.id));
+            list.appendChild(div);
+        }
+    }
+
+    async showExecutionDetails(execId) {
+        try {
+            this.showLoading();
+            const res = await fetch(`/api/execution/${execId}`);
+            if (!res.ok) {
+                alert('Failed to load execution details');
+                this.hideLoading();
+                return;
+            }
+            const data = await res.json();
+            // Fill modal fields
+            document.getElementById('execution-modal-title').textContent = `Execution Details`;
+            document.getElementById('detail-machine').textContent = data.machine_name
+                ? `${data.machine_name} (${data.machine_host})`
+                : data.machine_host || data.machine_id;
+            document.getElementById('detail-type').textContent = data.type || '';
+            document.getElementById('detail-status').textContent = data.status || '';
+            document.getElementById('detail-duration').textContent = data.duration ? data.duration.toFixed(1) + 's' : '';
+            document.getElementById('detail-started').textContent = data.started_at || '';
+            document.getElementById('detail-completed').textContent = data.completed_at || '';
+            document.getElementById('detail-command').textContent = data.command || '';
+            document.getElementById('detail-output').textContent = data.output || '';
+            document.getElementById('detail-logs').textContent = data.logs || '';
+            this.showModal('execution-details-modal');
+        } catch (e) {
+            alert('Failed to load execution details');
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    formatDate(dt) {
+        // dt: ISO string or sqlite timestamp
+        if (!dt) return '';
+        const d = new Date(dt.replace(' ', 'T'));
+        return d.toLocaleString();
+    }
+
+    async populateDashboardMachineFilter() {
+        // Populate machine filter dropdown
+        try {
+            const res = await fetch('/api/machines');
+            if (!res.ok) return;
+            const machines = await res.json();
+            const sel = document.getElementById('machine-filter');
+            sel.innerHTML = '<option value="">All Machines</option>';
+            for (const m of machines) {
+                const opt = document.createElement('option');
+                opt.value = m.id;
+                opt.textContent = m.name ? `${m.name} (${m.host})` : m.host;
+                sel.appendChild(opt);
+            }
+        } catch (e) { }
+    }
+
+    async clearExecutionHistory() {
+        // Call backend to clear all execution history
+        try {
+            const res = await fetch('/api/execution-history', { method: 'DELETE' });
+            if (res.ok) {
+                document.getElementById('execution-list').innerHTML = `<div class="empty-state"><i class="fas fa-inbox"></i><p>No executions found</p></div>`;
+                // Refresh dashboard stats after clearing
+                this.loadDashboardStats();
+            } else {
+                alert('Failed to clear execution history');
+            }
+        } catch (e) {
+            alert('Failed to clear execution history');
+        }
     }
 
     startPingInterval() {
@@ -57,123 +355,21 @@ class RemoteRunApp {
     }
 
     setupEventListeners() {
-        // Navigation
+        // Navigation (always present)
         document.querySelectorAll('.nav-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 this.switchSection(e.currentTarget.dataset.section);
             });
         });
 
-        // Machine management
-        document.getElementById('add-machine-btn').addEventListener('click', () => {
-            this.showModal('add-machine-modal');
-        });
-
-        document.getElementById('save-machine-btn').addEventListener('click', () => {
-            this.saveMachine();
-        });
-
-        document.getElementById('test-connection-btn').addEventListener('click', () => {
-            this.testConnection();
-        });
-
-        document.getElementById('cancel-machine-btn').addEventListener('click', () => {
-            this.hideModal('add-machine-modal');
-        });
-
-        // Authentication type toggle
-        document.getElementById('machine-auth-type').addEventListener('change', (e) => {
-            this.toggleAuthType(e.target.value);
-        });
-
-        // Command execution
-        document.getElementById('execute-command-btn').addEventListener('click', () => {
-            this.executeCommand();
-        });
-
-        document.getElementById('clear-command-btn').addEventListener('click', () => {
-            this.clearCommand();
-        });
-
-        // Python scripts
-        document.getElementById('run-python-btn').addEventListener('click', () => {
-            this.runPythonScript();
-        });
-
-        document.getElementById('save-python-btn').addEventListener('click', () => {
-            this.savePythonScript();
-        });
-
-        document.getElementById('clear-python-btn').addEventListener('click', () => {
-            this.clearPython();
-        });
-
-        // Ansible
-        document.querySelectorAll('.mode-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                this.switchAnsibleMode(e.target.dataset.mode);
-            });
-        });
-
-        document.getElementById('run-ansible-btn').addEventListener('click', () => {
-            this.runAnsible();
-        });
-
-        // Save Ansible playbook from Playbook Editor
-        document.getElementById('save-ansible-editor-btn').addEventListener('click', () => {
-            this.saveAnsiblePlaybookFromEditor();
-        });
-
-        document.getElementById('save-ansible-btn').addEventListener('click', () => {
-            this.saveAnsible();
-        });
-
-        // Terraform
-        document.getElementById('terraform-plan-btn').addEventListener('click', () => {
-            this.runTerraform('plan');
-        });
-
-        document.getElementById('terraform-apply-btn').addEventListener('click', () => {
-            this.runTerraform('apply');
-        });
-
-        document.getElementById('terraform-destroy-btn').addEventListener('click', () => {
-            this.runTerraform('destroy');
-        });
-
-        document.getElementById('save-terraform-btn').addEventListener('click', () => {
-            this.saveTerraformScript();
-        });
-
-        document.getElementById('clear-terraform-btn').addEventListener('click', () => {
-            this.clearTerraform();
-        });
-
-        // Enhanced Logs controls
-        document.getElementById('toggle-logs-btn').addEventListener('click', () => {
-            this.toggleLogs();
-        });
-
-        document.getElementById('maximize-logs-btn').addEventListener('click', () => {
-            this.maximizeLogs();
-        });
-
-        document.getElementById('minimize-logs-btn').addEventListener('click', () => {
-            this.minimizeLogs();
-        });
-
-        document.getElementById('clear-logs-btn').addEventListener('click', () => {
-            this.clearLogs();
-        });
-
-        // Modal close
+        // Modal close (always present)
         document.querySelectorAll('.modal-close').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 this.hideModal(e.target.closest('.modal').id);
             });
         });
 
-        // Click outside modal to close
+        // Click outside modal to close (always present)
         document.querySelectorAll('.modal').forEach(modal => {
             modal.addEventListener('click', (e) => {
                 if (e.target === modal) {
@@ -182,18 +378,43 @@ class RemoteRunApp {
             });
         });
 
-        // Filename updates for tab names
-        document.getElementById('python-filename').addEventListener('input', (e) => {
-            this.updateTabName('python-tab-name', e.target.value || 'script.py');
-        });
+        // Authentication type toggle (always present)
+        const authType = document.getElementById('machine-auth-type');
+        if (authType) {
+            authType.addEventListener('change', (e) => {
+                this.toggleAuthType(e.target.value);
+            });
+        }
 
-        document.getElementById('ansible-filename').addEventListener('input', (e) => {
-            this.updateTabName('ansible-tab-name', e.target.value || 'playbook.yml');
-        });
+        // Filename updates for tab names (always present)
+        const pyFile = document.getElementById('python-filename');
+        if (pyFile) {
+            pyFile.addEventListener('input', (e) => {
+                this.updateTabName('python-tab-name', e.target.value || 'script.py');
+            });
+        }
+        const ansFile = document.getElementById('ansible-filename');
+        if (ansFile) {
+            ansFile.addEventListener('input', (e) => {
+                this.updateTabName('ansible-tab-name', e.target.value || 'playbook.yml');
+            });
+        }
+        const tfFile = document.getElementById('terraform-filename');
+        if (tfFile) {
+            tfFile.addEventListener('input', (e) => {
+                this.updateTabName('terraform-tab-name', e.target.value || 'main.tf');
+            });
+        }
 
-        document.getElementById('terraform-filename').addEventListener('input', (e) => {
-            this.updateTabName('terraform-tab-name', e.target.value || 'main.tf');
-        });
+        // Enhanced Logs controls (always present)
+        const toggleLogsBtn = document.getElementById('toggle-logs-btn');
+        if (toggleLogsBtn) toggleLogsBtn.addEventListener('click', () => this.toggleLogs());
+        const maximizeLogsBtn = document.getElementById('maximize-logs-btn');
+        if (maximizeLogsBtn) maximizeLogsBtn.addEventListener('click', () => this.maximizeLogs());
+        const minimizeLogsBtn = document.getElementById('minimize-logs-btn');
+        if (minimizeLogsBtn) minimizeLogsBtn.addEventListener('click', () => this.minimizeLogs());
+        const clearLogsBtn = document.getElementById('clear-logs-btn');
+        if (clearLogsBtn) clearLogsBtn.addEventListener('click', () => this.clearLogs());
     }
 
     setupSocketIO() {
@@ -234,24 +455,24 @@ class RemoteRunApp {
         // Fallback WebSocket connection
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws`;
-        
+
         try {
             this.websocket = new WebSocket(wsUrl);
-            
+
             this.websocket.onopen = () => {
                 this.addLog('Connected to live logs via WebSocket', 'success');
             };
-            
+
             this.websocket.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 this.addLog(data.message, data.level || 'info');
             };
-            
+
             this.websocket.onclose = () => {
                 this.addLog('Disconnected from live logs', 'warning');
                 setTimeout(() => this.setupWebSocket(), 5000);
             };
-            
+
             this.websocket.onerror = (error) => {
                 this.addLog('WebSocket error occurred', 'error');
             };
@@ -284,7 +505,7 @@ class RemoteRunApp {
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropZone.classList.remove('dragover');
-            
+
             const files = Array.from(e.dataTransfer.files);
             this.handleFileUpload(files, acceptedTypes);
         });
@@ -300,14 +521,23 @@ class RemoteRunApp {
             btn.addEventListener('click', (e) => {
                 const tabName = e.target.dataset.tab;
                 const tabContainer = e.target.closest('.file-upload-section') || e.target.closest('.script-panel');
-                
+
                 tabContainer.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
                 tabContainer.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-                
+
                 e.target.classList.add('active');
                 const targetPane = document.getElementById(`${tabName}-tab`) || document.getElementById(tabName);
                 if (targetPane) {
                     targetPane.classList.add('active');
+                }
+
+                // Load existing files when switching to "existing" tabs
+                if (tabName === 'existing') {
+                    this.loadExistingFiles('python');
+                } else if (tabName === 'existing-ansible') {
+                    this.loadExistingFiles('ansible');
+                } else if (tabName === 'existing-tf') {
+                    this.loadExistingFiles('terraform');
                 }
             });
         });
@@ -316,36 +546,36 @@ class RemoteRunApp {
     setupCodeEditors() {
         // Setup line numbers and enhanced functionality for code editors
         const editors = ['python-editor', 'ansible-editor', 'terraform-editor'];
-        
+
         editors.forEach(editorId => {
             const editor = document.getElementById(editorId);
             const lineNumbersId = editorId.replace('-editor', '-line-numbers');
             const lineNumbers = document.getElementById(lineNumbersId);
-            
+
             if (editor && lineNumbers) {
                 this.editors[editorId] = {
                     element: editor,
                     lineNumbers: lineNumbers
                 };
-                
+
                 // Update line numbers on input
                 editor.addEventListener('input', () => {
                     this.updateLineNumbers(editorId);
                 });
-                
+
                 // Update line numbers on scroll
                 editor.addEventListener('scroll', () => {
                     lineNumbers.scrollTop = editor.scrollTop;
                 });
-                
+
                 // Handle tab key for proper indentation
                 editor.addEventListener('keydown', (e) => {
                     this.handleEditorKeydown(e, editorId);
                 });
-                
+
                 // Initial line numbers
                 this.updateLineNumbers(editorId);
-                
+
                 // Auto-resize editor
                 editor.addEventListener('input', () => {
                     this.autoResizeEditor(editorId);
@@ -357,34 +587,34 @@ class RemoteRunApp {
     updateLineNumbers(editorId) {
         const editor = this.editors[editorId];
         if (!editor) return;
-        
+
         const lines = editor.element.value.split('\n');
         const lineCount = lines.length;
-        
+
         let lineNumbersHtml = '';
         for (let i = 1; i <= lineCount; i++) {
             lineNumbersHtml += i + '\n';
         }
-        
+
         editor.lineNumbers.textContent = lineNumbersHtml;
     }
 
     handleEditorKeydown(e, editorId) {
         const editor = this.editors[editorId].element;
-        
+
         // Handle Tab key for indentation
         if (e.key === 'Tab') {
             e.preventDefault();
             const start = editor.selectionStart;
             const end = editor.selectionEnd;
-            
+
             if (e.shiftKey) {
                 // Shift+Tab: Remove indentation
                 const beforeCursor = editor.value.substring(0, start);
                 const afterCursor = editor.value.substring(end);
                 const lines = beforeCursor.split('\n');
                 const currentLine = lines[lines.length - 1];
-                
+
                 if (currentLine.startsWith('    ')) {
                     lines[lines.length - 1] = currentLine.substring(4);
                     editor.value = lines.join('\n') + afterCursor;
@@ -400,29 +630,29 @@ class RemoteRunApp {
                 editor.value = editor.value.substring(0, start) + indent + editor.value.substring(end);
                 editor.selectionStart = editor.selectionEnd = start + indent.length;
             }
-            
+
             this.updateLineNumbers(editorId);
         }
-        
+
         // Handle Enter key for auto-indentation
         if (e.key === 'Enter') {
             const start = editor.selectionStart;
             const beforeCursor = editor.value.substring(0, start);
             const lines = beforeCursor.split('\n');
             const currentLine = lines[lines.length - 1];
-            
+
             // Get current indentation
             const indentMatch = currentLine.match(/^(\s*)/);
             const currentIndent = indentMatch ? indentMatch[1] : '';
-            
+
             // Add extra indentation for certain patterns
             let extraIndent = '';
-            if (currentLine.trim().endsWith(':') || 
+            if (currentLine.trim().endsWith(':') ||
                 currentLine.trim().endsWith('{') ||
                 currentLine.trim().endsWith('[')) {
                 extraIndent = '    ';
             }
-            
+
             setTimeout(() => {
                 const newStart = editor.selectionStart;
                 const newIndent = currentIndent + extraIndent;
@@ -439,7 +669,7 @@ class RemoteRunApp {
         const minHeight = 400;
         const lineHeight = 21; // Approximate line height
         const newHeight = Math.max(minHeight, lines * lineHeight + 30);
-        
+
         editor.style.height = newHeight + 'px';
         this.editors[editorId].lineNumbers.style.height = newHeight + 'px';
     }
@@ -455,9 +685,9 @@ class RemoteRunApp {
     toggleLogs() {
         const logsPanel = document.getElementById('logs-panel');
         const toggleBtn = document.getElementById('toggle-logs-btn');
-        
+
         logsPanel.classList.toggle('collapsed');
-        
+
         const icon = toggleBtn.querySelector('i');
         if (logsPanel.classList.contains('collapsed')) {
             icon.className = 'fas fa-chevron-up';
@@ -472,13 +702,13 @@ class RemoteRunApp {
         const logsPanel = document.getElementById('logs-panel');
         const maximizeBtn = document.getElementById('maximize-logs-btn');
         const minimizeBtn = document.getElementById('minimize-logs-btn');
-        
+
         logsPanel.classList.add('maximized');
         logsPanel.classList.remove('collapsed');
-        
+
         maximizeBtn.style.display = 'none';
         minimizeBtn.style.display = 'inline-flex';
-        
+
         // Update toggle button
         const toggleBtn = document.getElementById('toggle-logs-btn');
         const icon = toggleBtn.querySelector('i');
@@ -490,9 +720,9 @@ class RemoteRunApp {
         const logsPanel = document.getElementById('logs-panel');
         const maximizeBtn = document.getElementById('maximize-logs-btn');
         const minimizeBtn = document.getElementById('minimize-logs-btn');
-        
+
         logsPanel.classList.remove('maximized');
-        
+
         maximizeBtn.style.display = 'inline-flex';
         minimizeBtn.style.display = 'none';
     }
@@ -523,7 +753,7 @@ class RemoteRunApp {
         // Update header button
         const headerActions = document.querySelector('.header-actions');
         headerActions.innerHTML = '';
-        
+
         if (section === 'machines') {
             headerActions.innerHTML = `
                 <button class="btn btn-primary" id="add-machine-btn">
@@ -535,7 +765,23 @@ class RemoteRunApp {
             });
         }
 
+        // Load existing files when switching to script sections
+        if (section === 'python') {
+            this.loadExistingFiles('python');
+        } else if (section === 'ansible') {
+            this.loadExistingFiles('ansible');
+        } else if (section === 'terraform') {
+            this.loadExistingFiles('terraform');
+        }
+
         this.currentSection = section;
+
+        // Dashboard reload
+        if (section === 'dashboard') {
+            this.loadDashboardStats();
+            this.loadDashboardHistory();
+            this.populateDashboardMachineFilter();
+        }
     }
 
     async loadMachines() {
@@ -556,21 +802,25 @@ class RemoteRunApp {
         grid.innerHTML = '';
 
         this.machines.forEach(machine => {
+            // Fallbacks for missing fields
+            const name = machine.name || machine.host || '';
+            const port = machine.port || 22;
+            const authType = machine.auth_type || 'password';
             const status = machine.status === 'online' ? 'online' : 'offline';
             const statusText = machine.status ? machine.status : 'offline';
             const card = document.createElement('div');
             card.className = 'machine-card';
             card.innerHTML = `
                 <div class="machine-header">
-                    <div class="machine-name">${machine.name}</div>
+                    <div class="machine-name">${name}</div>
                     <div class="machine-status status-${status}">
                         ${statusText}
                     </div>
                 </div>
                 <div class="machine-info">
-                    <p><strong>Host:</strong> ${machine.host}:${machine.port}</p>
-                    <p><strong>Username:</strong> ${machine.username}</p>
-                    <p><strong>Auth:</strong> ${machine.auth_type}</p>
+                    <p><strong>Host:</strong> ${machine.host}:${port}</p>
+                    <p><strong>Username:</strong> ${machine.username || ''}</p>
+                    <p><strong>Auth:</strong> ${authType}</p>
                 </div>
                 <div class="machine-actions">
                     <button class="action-btn" onclick="app.testMachineConnection('${machine.id}')" title="Test Connection">
@@ -601,18 +851,34 @@ class RemoteRunApp {
 
         selects.forEach(selectId => {
             const select = document.getElementById(selectId);
-            select.innerHTML = '<option value="">Choose a machine...</option>';
-            
+            if (!select) return;
+
+            // Save the currently selected value using the DOM value property (most reliable)
+            const prevValue = select.value || '';
+
+            // Clear and repopulate options
+            select.innerHTML = '';
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = 'Choose a machine...';
+            select.appendChild(defaultOption);
+
             this.machines.forEach(machine => {
                 const option = document.createElement('option');
                 option.value = machine.id;
                 option.textContent = `${machine.name} (${machine.host})`;
                 select.appendChild(option);
             });
-        });
-    }
 
-    async saveMachine() {
+            // Restore previous selection if the machine still exists
+            if (prevValue && this.machines.some(m => m.id === prevValue)) {
+                select.value = prevValue;
+            } else {
+                // Set to empty (default option)
+                select.value = '';
+            }
+        });
+    } async saveMachine() {
         const formData = {
             id: document.getElementById('machine-id').value,
             name: document.getElementById('machine-name').value,
@@ -694,7 +960,13 @@ class RemoteRunApp {
     }
 
     async testConnection() {
-        const machineId = document.getElementById('machine-id')?.value;
+        // Use the selected machine from the machines list, not the modal form
+        let machineId = document.getElementById('machine-id')?.value;
+        // If not present, try to get from the select dropdown (for add)
+        if (!machineId) {
+            const select = document.getElementById('command-machine-select');
+            if (select) machineId = select.value;
+        }
         if (!machineId) {
             alert('No machine selected for connection test');
             return;
@@ -708,8 +980,12 @@ class RemoteRunApp {
                 },
                 body: JSON.stringify({ machine_id: machineId })
             });
-            const result = await response.json();
-            if (result.success) {
+            // Accept both 200 and 404 as valid responses to parse JSON
+            let result = {};
+            try {
+                result = await response.json();
+            } catch (e) { }
+            if (response.ok && result.success) {
                 alert('Connection successful!');
                 this.addLog('Connection test successful', 'success');
             } else {
@@ -764,13 +1040,16 @@ class RemoteRunApp {
             });
 
             const result = await response.json();
-            
+
             if (result.success) {
                 this.addLog(`Command executed successfully`, 'success');
                 this.addLog(`Output: ${result.output}`, 'info');
             } else {
                 this.addLog(`Command failed: ${result.message}`, 'error');
             }
+            // Refresh dashboard stats and history after execution
+            this.loadDashboardStats();
+            this.loadDashboardHistory();
         } catch (error) {
             this.addLog('Failed to execute command', 'error');
         } finally {
@@ -786,7 +1065,7 @@ class RemoteRunApp {
 
     async runPythonScript() {
         const machineId = document.getElementById('python-machine-select').value;
-        
+
         if (!machineId) {
             alert('Please select a machine');
             return;
@@ -829,7 +1108,7 @@ class RemoteRunApp {
             });
 
             const result = await response.json();
-            
+
             if (result.success) {
                 this.addLog(`Python script executed successfully`, 'success');
                 this.addLog(`Output: ${result.output}`, 'info');
@@ -890,6 +1169,42 @@ class RemoteRunApp {
         this.updateTabName('python-tab-name', 'script.py');
     }
 
+    async saveAnsibleScript() {
+        const scriptContent = document.getElementById('ansible-editor').value;
+        const filename = document.getElementById('ansible-filename').value;
+
+        if (!scriptContent || !filename) {
+            alert('Please enter script content and filename');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/save-script', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    type: 'ansible',
+                    filename: filename,
+                    content: scriptContent
+                })
+            });
+
+            if (response.ok) {
+                this.addLog(`Ansible script saved: ${filename}`, 'success');
+                this.loadExistingFiles('ansible');
+            } else {
+                const error = await response.json().catch(() => ({}));
+                this.addLog('Failed to save Ansible script' + (error.message ? ': ' + error.message : ''), 'error');
+                alert('Failed to save Ansible script' + (error.message ? ': ' + error.message : ''));
+            }
+        } catch (error) {
+            this.addLog('Failed to save Ansible script: ' + (error.message || error), 'error');
+            alert('Failed to save Ansible script: ' + (error.message || error));
+        }
+    }
+
     switchAnsibleMode(mode) {
         document.querySelectorAll('.mode-btn').forEach(btn => {
             btn.classList.remove('active');
@@ -904,7 +1219,7 @@ class RemoteRunApp {
 
     async runAnsible() {
         const machineId = document.getElementById('ansible-machine-select').value;
-        
+
         if (!machineId) {
             alert('Please select a machine');
             return;
@@ -936,7 +1251,7 @@ class RemoteRunApp {
             });
 
             const result = await response.json();
-            
+
             if (result.success) {
                 this.addLog(`Ansible ${activeMode} executed successfully`, 'success');
                 // Pretty print output if it's an object
@@ -964,7 +1279,7 @@ class RemoteRunApp {
 
     async runTerraform(action) {
         const machineId = document.getElementById('terraform-machine-select').value;
-        
+
         if (!machineId) {
             alert('Please select a machine');
             return;
@@ -991,7 +1306,7 @@ class RemoteRunApp {
             });
 
             const result = await response.json();
-            
+
             if (result.success) {
                 this.addLog(`Terraform ${action} executed successfully`, 'success');
                 this.addLog(`Output: ${result.output}`, 'info');
@@ -1052,15 +1367,15 @@ class RemoteRunApp {
     handleFileUpload(files, acceptedTypes) {
         files.forEach(file => {
             const extension = '.' + file.name.split('.').pop().toLowerCase();
-            
+
             if (acceptedTypes.includes(extension)) {
                 this.addLog(`File uploaded: ${file.name}`, 'success');
-                
+
                 // Read file content and load into editor
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     const content = e.target.result;
-                    
+
                     if (extension === '.py') {
                         document.getElementById('python-editor').value = content;
                         document.getElementById('python-filename').value = file.name;
@@ -1093,13 +1408,19 @@ class RemoteRunApp {
 
     async loadExistingFiles(type) {
         try {
+            console.log(`Loading existing ${type} files...`);
             const response = await fetch(`/api/files/${type}`);
             if (response.ok) {
                 const files = await response.json();
+                console.log(`Loaded ${files.length} ${type} files:`, files);
                 this.renderFileList(files, type);
+            } else {
+                console.error(`Failed to load ${type} files, status:`, response.status);
+                this.addLog(`Failed to load ${type} files (status: ${response.status})`, 'error');
             }
         } catch (error) {
-            this.addLog(`Failed to load ${type} files`, 'error');
+            console.error(`Error loading ${type} files:`, error);
+            this.addLog(`Failed to load ${type} files: ${error.message}`, 'error');
         }
     }
 
@@ -1138,7 +1459,7 @@ class RemoteRunApp {
             const response = await fetch(`/api/files/${type}/${fileId}`);
             if (response.ok) {
                 const data = await response.json();
-                
+
                 if (type === 'python') {
                     document.getElementById('python-editor').value = data.content;
                     document.getElementById('python-filename').value = data.name;
@@ -1158,7 +1479,7 @@ class RemoteRunApp {
                     this.updateTabName('terraform-tab-name', data.name);
                     document.querySelector('[data-tab="editor-tf"]').click();
                 }
-                
+
                 this.addLog(`File loaded: ${data.name}`, 'success');
             } else {
                 this.addLog(`Failed to load ${type} file`, 'error');
@@ -1207,7 +1528,7 @@ class RemoteRunApp {
             <span class="log-level ${level}">${level.toUpperCase()}</span>
             <span class="log-message">${displayMessage}</span>
         `;
-        
+
         logsContent.appendChild(entry);
         logsContent.scrollTop = logsContent.scrollHeight;
 
@@ -1230,7 +1551,7 @@ class RemoteRunApp {
 
     hideModal(modalId) {
         document.getElementById(modalId).classList.remove('show');
-        
+
         if (modalId === 'add-machine-modal') {
             document.getElementById('add-machine-form').reset();
             document.getElementById('machine-port').value = '22';
@@ -1249,10 +1570,19 @@ class RemoteRunApp {
 
     // Machine-specific actions
     async testMachineConnection(machineId) {
-        const machine = this.machines.find(m => m.id === machineId);
-        if (!machine) return;
+        // Fix: Always use the correct endpoint and pass the machineId
+        if (!machineId) {
+            alert('No machine selected for connection test');
+            return;
+        }
         this.showLoading();
-        this.addLog(`Testing connection to ${machine.name}`, 'info');
+        const machine = this.machines.find(m => m.id === machineId);
+        if (!machine) {
+            this.addLog('Machine not found', 'error');
+            this.hideLoading();
+            return;
+        }
+        this.addLog(`Testing connection to ${machine.name || machine.host}`, 'info');
         try {
             const response = await fetch('/api/test-connection', {
                 method: 'POST',
@@ -1261,18 +1591,21 @@ class RemoteRunApp {
                 },
                 body: JSON.stringify({ machine_id: machineId })
             });
-            const result = await response.json();
-            if (result.success) {
-                this.addLog(`Connection to ${machine.name} successful`, 'success');
+            let result = {};
+            try {
+                result = await response.json();
+            } catch (e) { }
+            if (response.ok && result.success) {
+                this.addLog(`Connection to ${machine.name || machine.host} successful`, 'success');
                 machine.status = 'online';
                 this.renderMachines();
             } else {
-                this.addLog(`Connection to ${machine.name} failed: ${result.message || 'Unknown error'}`, 'error');
+                this.addLog(`Connection to ${machine.name || machine.host} failed: ${result.message || 'Unknown error'}`, 'error');
                 machine.status = 'offline';
                 this.renderMachines();
             }
         } catch (error) {
-            this.addLog(`Connection test failed for ${machine.name}`, 'error');
+            this.addLog(`Connection test failed for ${machine.name || machine.host}`, 'error');
             machine.status = 'offline';
             this.renderMachines();
         } finally {
@@ -1298,7 +1631,17 @@ class RemoteRunApp {
 
         const saveBtn = document.getElementById('save-machine-btn');
         saveBtn.textContent = 'Update Machine';
-        saveBtn.onclick = () => this.updateMachine(machineId);
+        // Remove previous event listeners to avoid stacking
+        const newSaveHandler = () => {
+            this.updateMachine(machineId);
+            // Restore default after update
+            saveBtn.textContent = 'Save Machine';
+            saveBtn.onclick = () => this.saveMachine();
+        };
+        saveBtn.onclick = null;
+        saveBtn.removeEventListener('click', this._saveMachineHandler);
+        saveBtn.onclick = newSaveHandler;
+        this._saveMachineHandler = newSaveHandler;
     }
 
     async updateMachine(machineId) {
@@ -1383,11 +1726,11 @@ class RemoteRunApp {
 
     async saveAnsible() {
         const activeMode = document.querySelector('.mode-btn.active').dataset.mode;
-        
+
         if (activeMode === 'adhoc') {
             const module = document.getElementById('ansible-module').value;
             const args = document.getElementById('ansible-args').value;
-            
+
             if (!module || !args) {
                 alert('Please enter module and arguments');
                 return;
@@ -1491,9 +1834,9 @@ document.addEventListener('keydown', (e) => {
     // Ctrl/Cmd + Enter to execute current action
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
-        
+
         const currentSection = app.currentSection;
-        
+
         switch (currentSection) {
             case 'commands':
                 document.getElementById('execute-command-btn').click();
@@ -1509,20 +1852,20 @@ document.addEventListener('keydown', (e) => {
                 break;
         }
     }
-    
+
     // Escape to close modals
     if (e.key === 'Escape') {
         document.querySelectorAll('.modal.show').forEach(modal => {
             app.hideModal(modal.id);
         });
     }
-    
+
     // Ctrl/Cmd + S to save current editor content
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
-        
+
         const currentSection = app.currentSection;
-        
+
         switch (currentSection) {
             case 'python':
                 const pythonTab = document.querySelector('#python-section .tab-btn.active').dataset.tab;

@@ -190,13 +190,19 @@ class SSHClient:
                 sftp = self.client.open_sftp()
                 remote_os = self.get_remote_os().get("os")
                 print(f"Detected remote OS: {remote_os}")
+                # Helper to join remote paths correctly
+                def remote_join(*args):
+                    if remote_os and remote_os.lower() == "windows":
+                        return "\\".join(args)
+                    else:
+                        return "/".join(args)
                 if path:
                     if remote_os == "windows":
                         self.run_command(f"mkdir {path}", verbose=False)
-                        remote_script_path = f"{path}\\{os.path.basename(file)}"
+                        remote_script_path = remote_join(path, os.path.basename(file))
                     else:
                         self.run_command(f"mkdir -p {path}", verbose=False)
-                        remote_script_path = f"{path}/{os.path.basename(file)}"
+                        remote_script_path = remote_join(path, os.path.basename(file))
                     sftp.put(file, remote_script_path)
                 else:
                     # Use get_remote_home for user-specific temp directory
@@ -210,7 +216,7 @@ class SSHClient:
                     rand_str = "".join(
                         random.choices(string.ascii_letters + string.digits, k=8)
                     )
-                    temp_dir = os.path.join(remote_home, f".tmp_{rand_str}")
+                    temp_dir = remote_join(remote_home, f".tmp_{rand_str}")
                     if remote_os and remote_os.lower() == "windows":
                         ps_cmd = f"powershell -Command \"New-Item -ItemType Directory -Path '{temp_dir}' -Force | Out-Null; Write-Output '{temp_dir}'\""
                         result = self.run_command(ps_cmd, verbose=False)
@@ -219,11 +225,11 @@ class SSHClient:
                             temp_path = out.strip().splitlines()[0] if out else temp_dir
                         else:
                             temp_path = temp_dir
-                        remote_script_path = f"{temp_path}\\{os.path.basename(file)}"
+                        remote_script_path = remote_join(temp_path, os.path.basename(file))
                     elif remote_os and remote_os.lower() == "linux":
                         self.run_command(f"mkdir -p '{temp_dir}'", verbose=False)
                         temp_path = temp_dir
-                        remote_script_path = f"{temp_path}/{os.path.basename(file)}"
+                        remote_script_path = remote_join(temp_path, os.path.basename(file))
                         print(f"Remote script path: {remote_script_path}")
                     else:
                         print("Unknown remote OS. Cannot determine temp path.")
@@ -258,6 +264,12 @@ class SSHClient:
         try:
             sftp = self.client.open_sftp()
             remote_os = self.get_remote_os().get("os")
+            # Helper to join remote paths correctly
+            def remote_join(*args):
+                if remote_os and remote_os.lower() == "windows":
+                    return "\\".join(args)
+                else:
+                    return "/".join(args)
             if remote_path is None:
                 # Create temp dir in remote user's home directory
                 remote_home = self.get_remote_home()
@@ -272,7 +284,7 @@ class SSHClient:
                     random.choices(string.ascii_letters + string.digits, k=8)
                 )
                 base_name = os.path.basename(local_dir.rstrip(os.sep))
-                remote_temp_dir = os.path.join(
+                remote_temp_dir = remote_join(
                     remote_home, f".tmp_{base_name}_{rand_str}"
                 )
                 # Create the directory on remote
@@ -301,7 +313,7 @@ class SSHClient:
                     pass  # Directory may already exist
                 for item in os.listdir(local_path):
                     lpath = os.path.join(local_path, item)
-                    rpath = os.path.join(remote_path, item)
+                    rpath = remote_join(remote_path, item)
                     if os.path.isdir(lpath):
                         _recursive_upload(lpath, rpath)
                     else:
@@ -408,6 +420,7 @@ class SSHClient:
         out=None,
         display=True,
         ansible_remote_tmp=None,
+        module="command",
     ):
         """
         Runs an Ansible playbook or an ad-hoc command targeting the remote host.
@@ -418,6 +431,7 @@ class SSHClient:
             playbook_or_command (str): Path to playbook file or ad-hoc command.
             extra_vars (str, optional): Extra variables for Ansible.
             inventory_file (str, optional): Path to inventory file. If None, a temporary inventory is created.
+            module (str, optional): Ansible module to use for ad-hoc commands. Defaults to "command".
         """
         is_local = platform.system().lower() == "linux"
         if not is_local:
@@ -483,10 +497,11 @@ class SSHClient:
                 # Ad-hoc command
                 remote_os = self.get_remote_os().get("os")
                 if inventory_file is None:
-                    if remote_os == "windows":
-                        module_name = "win_shell"
+                    # Use the passed module parameter, but adjust for Windows if needed
+                    if remote_os == "windows" and module in ["command", "shell"]:
+                        module_name = "win_shell" if module == "shell" else "win_command"
                     else:
-                        module_name = "shell"
+                        module_name = module
                     command = [
                         executable,
                         self.hostname,
@@ -498,10 +513,11 @@ class SSHClient:
                         playbook_or_command,
                     ]
                 else:
-                    if remote_os == "windows":
-                        module_name = "win_shell"
+                    # Use the passed module parameter, but adjust for Windows if needed
+                    if remote_os == "windows" and module in ["command", "shell"]:
+                        module_name = "win_shell" if module == "shell" else "win_command"
                     else:
-                        module_name = "shell"
+                        module_name = module
                     command = [
                         executable,
                         "all",
