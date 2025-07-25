@@ -119,11 +119,42 @@ client.close()
 ```
 
 
-### Dashboard API Server
+### Dashboard: Enterprise Remote Management
 
-You can launch a web-based dashboard to manage remote machines, execute commands, run Python scripts, Ansible, and Terraform, all from a browser UI.
+The `remoterunlib` Dashboard provides a modern, enterprise-grade web interface for managing remote machines, executing commands, running scripts, and automating infrastructure tasks. Designed for IT teams, DevOps, and cloud engineers, it offers:
 
-#### Quick Start
+- **Machine Management**: Add, update, and organize remote hosts.
+- **Command Execution**: Run shell/CLI commands with live output and error logs.
+- **Python Script Execution**: Upload and execute Python scripts remotely.
+- **Directory/File Transfer**: Send and receive files/directories with ease.
+- **Ansible Playbooks**: Run playbooks or ad-hoc commands, view results and logs.
+- **Terraform Automation**: Execute plans, applies, imports, and more, with full output.
+- **Live Logs & Execution History**: View real-time logs and track all executions.
+- **REST API & WebSocket**: Integrate with CI/CD or other tools, receive live updates.
+
+### Dashboard Screenshots
+
+#### 1. Dashboard Home
+![Dashboard Home](assets/dashboard/dashboard1.png)
+
+#### 2. Machine Management
+![Machine Management](assets/dashboard/dashboard2.png)
+
+#### 3. Execute CLI Commands
+![Execute CLI Commands](assets/dashboard/dashboard3.png)
+
+#### 4. Run Python Scripts
+![Run Python Scripts](assets/dashboard/dashboard4.png)
+
+#### 5. Run Ansible Playbooks
+![Run Ansible Playbooks](assets/dashboard/dashboard5.png)
+
+#### 6. Run Terraform Playbooks
+![Run Terraform Playbooks](assets/dashboard/dashboard6.png)
+
+---
+
+### Quick Start
 
 ```python
 from remoterunlib import Dashboard
@@ -132,9 +163,19 @@ client = Dashboard(host='localhost', port=8000)
 client.serve()
 ```
 
-This will start a Flask server at `http://localhost:8000` with a web UI and REST API. You can add machines, run commands, scripts, and more from the browser.
+This launches a Flask server at `http://localhost:8000` with a secure, responsive web UI and REST API. Manage machines, execute commands, run scripts, and automate infrastructure from your browser.
 
-See [`demo/dashboard_example.py`](demo/dashboard_example.py) for a minimal example.
+#### Key Features
+
+- **Command Execution**: Run shell commands on any managed machine, with live logs and error reporting.
+- **Python Script Runner**: Upload and execute Python scripts, view output and errors in real time.
+- **File & Directory Transfer**: Send/receive files and directories between local and remote hosts.
+- **Ansible Automation**: Run playbooks or ad-hoc commands, monitor execution, and review logs/history.
+- **Terraform Automation**: Plan, apply, import, and manage infrastructure as code, with full output and error tracking.
+- **Execution History**: Every action is logged; review past executions, outputs, and errors.
+- **Live Logs**: Real-time streaming of command/script/playbook output via WebSocket.
+- **Enterprise Security**: Role-based access, audit logs, and encrypted credentials (coming soon).
+- **REST API**: Integrate with CI/CD pipelines, automation tools, or custom dashboards.
 
 #### API Endpoints
 
