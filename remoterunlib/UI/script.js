@@ -6,11 +6,21 @@ class RemoteRunApp {
         this.websocket = null;
         this.socket = null;
         this.editors = {};
+        this.editingContext = null; // For tracking file editing state
         // Dashboard state
         this.dashboardFilters = {
             machine_id: '',
             type: '',
             status: ''
+        };
+        // Auto-logs state management
+        this.logsState = {
+            isExecuting: false,
+            userInteractingWithLogs: false,
+            lastUserAction: null,
+            autoMinimizeTimeout: null,
+            executionStartTime: null,
+            manuallyCollapsed: false
         };
         this.init();
     }
@@ -82,7 +92,77 @@ class RemoteRunApp {
             clearTerraformBtn.addEventListener('click', () => this.clearTerraform());
         }
 
+        // Add event listeners for new tab-specific buttons
+        // Python Upload and Editor buttons
+        const runPythonUploadBtn = document.getElementById('run-python-upload-btn');
+        if (runPythonUploadBtn) {
+            runPythonUploadBtn.addEventListener('click', () => this.runPythonScript());
+        }
+
+        const clearPythonUploadBtn = document.getElementById('clear-python-upload-btn');
+        if (clearPythonUploadBtn) {
+            clearPythonUploadBtn.addEventListener('click', () => this.clearPython());
+        }
+
+        const runPythonEditorBtn = document.getElementById('run-python-editor-btn');
+        if (runPythonEditorBtn) {
+            runPythonEditorBtn.addEventListener('click', () => this.runPythonScript());
+        }
+
+        const clearPythonEditorBtn = document.getElementById('clear-python-editor-btn');
+        if (clearPythonEditorBtn) {
+            clearPythonEditorBtn.addEventListener('click', () => this.clearPython());
+        }
+
+        // Ansible Upload and Editor buttons
+        const runAnsibleUploadBtn = document.getElementById('run-ansible-upload-btn');
+        if (runAnsibleUploadBtn) {
+            runAnsibleUploadBtn.addEventListener('click', () => this.runAnsible());
+        }
+
+        const clearAnsibleUploadBtn = document.getElementById('clear-ansible-upload-btn');
+        if (clearAnsibleUploadBtn) {
+            clearAnsibleUploadBtn.addEventListener('click', () => this.clearAnsible());
+        }
+
+        const runAnsibleEditorBtn = document.getElementById('run-ansible-editor-btn');
+        if (runAnsibleEditorBtn) {
+            runAnsibleEditorBtn.addEventListener('click', () => this.runAnsible());
+        }
+
+        const clearAnsibleEditorBtn = document.getElementById('clear-ansible-editor-btn');
+        if (clearAnsibleEditorBtn) {
+            clearAnsibleEditorBtn.addEventListener('click', () => this.clearAnsible());
+        }
+
+        // Ansible Ad-hoc buttons
+        const runAnsibleAdhocBtn = document.getElementById('run-ansible-adhoc-btn');
+        if (runAnsibleAdhocBtn) {
+            runAnsibleAdhocBtn.addEventListener('click', () => this.runAnsible());
+        }
+
+        const clearAnsibleAdhocBtn = document.getElementById('clear-ansible-adhoc-btn');
+        if (clearAnsibleAdhocBtn) {
+            clearAnsibleAdhocBtn.addEventListener('click', () => this.clearAnsible());
+        }
+
+        // Terraform Upload buttons
+        const runTerraformUploadBtn = document.getElementById('run-terraform-upload-btn');
+        if (runTerraformUploadBtn) {
+            runTerraformUploadBtn.addEventListener('click', () => this.runTerraform('plan'));
+        }
+
+        const clearTerraformUploadBtn = document.getElementById('clear-terraform-upload-btn');
+        if (clearTerraformUploadBtn) {
+            clearTerraformUploadBtn.addEventListener('click', () => this.clearTerraform());
+        }
+
         // Add event listeners for Terraform action buttons
+        const terraformInitBtn = document.getElementById('terraform-init-btn');
+        if (terraformInitBtn) {
+            terraformInitBtn.addEventListener('click', () => this.runTerraform('init'));
+        }
+
         const terraformPlanBtn = document.getElementById('terraform-plan-btn');
         if (terraformPlanBtn) {
             terraformPlanBtn.addEventListener('click', () => this.runTerraform('plan'));
@@ -91,11 +171,6 @@ class RemoteRunApp {
         const terraformApplyBtn = document.getElementById('terraform-apply-btn');
         if (terraformApplyBtn) {
             terraformApplyBtn.addEventListener('click', () => this.runTerraform('apply'));
-        }
-
-        const terraformDestroyBtn = document.getElementById('terraform-destroy-btn');
-        if (terraformDestroyBtn) {
-            terraformDestroyBtn.addEventListener('click', () => this.runTerraform('destroy'));
         }
 
         // Fix: Add event listeners for Ansible mode toggle buttons
@@ -114,12 +189,24 @@ class RemoteRunApp {
         this.loadExistingFiles('ansible');
         this.loadExistingFiles('terraform');
 
+        // Initialize directory management
+        this.initDirectoryManagement();
+
         // Dashboard
         this.initDashboard();
 
         // Modal close for execution details
         document.getElementById('close-execution-details-btn').addEventListener('click', () => {
             this.hideModal('execution-details-modal');
+        });
+
+        // Download buttons for execution details
+        document.getElementById('download-output-btn').addEventListener('click', () => {
+            this.downloadExecutionData('output');
+        });
+
+        document.getElementById('download-logs-btn').addEventListener('click', () => {
+            this.downloadExecutionData('logs');
         });
 
         // Save Machine button event (for add new)
@@ -147,7 +234,238 @@ class RemoteRunApp {
                 this.testMachineConnection(machineId);
             });
         }
+
+        // Initialize privilege controls
+        this.initPrivilegeControls();
+
+        // Initialize auto-logs behavior
+        this.initAutoLogsManagement();
     }
+
+    // === PRIVILEGE CONTROLS MANAGEMENT ===
+    initPrivilegeControls() {
+        // Initialize all privilege control checkboxes
+        const privilegeCheckboxes = [
+            'ansible-adhoc-become',
+            'ansible-upload-become',
+            'ansible-editor-become'
+        ];
+
+        privilegeCheckboxes.forEach(checkboxId => {
+            const checkbox = document.getElementById(checkboxId);
+            if (checkbox) {
+                // Get the parent privilege control container
+                const controlContainer = checkbox.closest('.privilege-control');
+
+                // Add change event listener
+                checkbox.addEventListener('change', (e) => {
+                    this.updatePrivilegeControlState(controlContainer, e.target.checked);
+                });
+
+                // Set initial state
+                this.updatePrivilegeControlState(controlContainer, checkbox.checked);
+            }
+        });
+    }
+
+    updatePrivilegeControlState(container, isEnabled) {
+        if (!container) return;
+
+        if (isEnabled) {
+            container.classList.add('enabled');
+            // Optional: Add subtle animation
+            container.style.transform = 'scale(1.02)';
+            setTimeout(() => {
+                container.style.transform = '';
+            }, 200);
+        } else {
+            container.classList.remove('enabled');
+        }
+    }
+
+    // === AUTO-LOGS MANAGEMENT SYSTEM ===
+    initAutoLogsManagement() {
+        // Set up logs panel interaction detection
+        const logsPanel = document.getElementById('logs-panel');
+        if (logsPanel) {
+            // Detect user interaction with logs panel
+            logsPanel.addEventListener('mouseenter', () => {
+                this.logsState.userInteractingWithLogs = true;
+                this.clearAutoMinimizeTimeout();
+            });
+
+            logsPanel.addEventListener('mouseleave', () => {
+                // Delay before considering user no longer interacting
+                setTimeout(() => {
+                    this.logsState.userInteractingWithLogs = false;
+                    this.scheduleAutoMinimizeIfIdle();
+                }, 1000);
+            });
+
+            // Track clicks within logs panel
+            logsPanel.addEventListener('click', (e) => {
+                this.logsState.userInteractingWithLogs = true;
+                this.clearAutoMinimizeTimeout();
+
+                // If user manually collapsed, remember this preference
+                if (e.target.closest('#toggle-logs-btn')) {
+                    this.logsState.manuallyCollapsed = logsPanel.classList.contains('collapsed');
+                }
+            });
+        }
+
+        // Track general user activity that should minimize logs
+        this.setupActivityTracking();
+
+        // Start with logs minimized
+        this.autoMinimizeLogs(false);
+    }
+
+    setupActivityTracking() {
+        // Track navigation clicks
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                this.handleUserActivity('navigation');
+            });
+        });
+
+        // Track tab switches
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('tab-btn')) {
+                this.handleUserActivity('tab-switch');
+            }
+        });
+
+        // Track typing in editors
+        document.querySelectorAll('.code-editor, input, textarea').forEach(element => {
+            element.addEventListener('focus', () => {
+                this.handleUserActivity('editing');
+            });
+        });
+
+        // Track form interactions
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('.form-control, .btn:not(.logs-controls .btn)')) {
+                // Exclude logs control buttons
+                if (!e.target.closest('.logs-panel')) {
+                    this.handleUserActivity('form-interaction');
+                }
+            }
+        });
+    }
+
+    handleUserActivity(activityType) {
+        this.logsState.lastUserAction = {
+            type: activityType,
+            timestamp: Date.now()
+        };
+
+        // Auto-minimize if not executing and not already manually collapsed
+        if (!this.logsState.isExecuting && !this.logsState.userInteractingWithLogs) {
+            this.scheduleAutoMinimize();
+        }
+    }
+
+    scheduleAutoMinimize() {
+        this.clearAutoMinimizeTimeout();
+
+        // Wait 2 seconds before auto-minimizing
+        this.logsState.autoMinimizeTimeout = setTimeout(() => {
+            if (!this.logsState.isExecuting && !this.logsState.userInteractingWithLogs) {
+                this.autoMinimizeLogs(true);
+            }
+        }, 2000);
+    }
+
+    scheduleAutoMinimizeIfIdle() {
+        // Only schedule if execution is done and user is not actively using logs
+        if (!this.logsState.isExecuting && !this.logsState.userInteractingWithLogs) {
+            this.scheduleAutoMinimize();
+        }
+    }
+
+    clearAutoMinimizeTimeout() {
+        if (this.logsState.autoMinimizeTimeout) {
+            clearTimeout(this.logsState.autoMinimizeTimeout);
+            this.logsState.autoMinimizeTimeout = null;
+        }
+    }
+
+    autoOpenLogs() {
+        const logsPanel = document.getElementById('logs-panel');
+        if (logsPanel && logsPanel.classList.contains('collapsed')) {
+            // Only auto-open if user didn't manually collapse during this execution
+            if (!this.logsState.manuallyCollapsed) {
+                logsPanel.classList.remove('collapsed');
+
+                // Update toggle button
+                const toggleBtn = document.getElementById('toggle-logs-btn');
+                if (toggleBtn) {
+                    const icon = toggleBtn.querySelector('i');
+                    if (icon) {
+                        icon.className = 'fas fa-chevron-down';
+                        toggleBtn.title = 'Collapse';
+                    }
+                }
+
+                this.addLog('🔍 Auto-opened logs for execution monitoring', 'info');
+            }
+        }
+    }
+
+    autoMinimizeLogs(showMessage = false) {
+        const logsPanel = document.getElementById('logs-panel');
+        if (logsPanel && !logsPanel.classList.contains('collapsed')) {
+            // Only auto-minimize if user is not interacting with logs
+            if (!this.logsState.userInteractingWithLogs) {
+                logsPanel.classList.add('collapsed');
+
+                // Update toggle button
+                const toggleBtn = document.getElementById('toggle-logs-btn');
+                if (toggleBtn) {
+                    const icon = toggleBtn.querySelector('i');
+                    if (icon) {
+                        icon.className = 'fas fa-chevron-up';
+                        toggleBtn.title = 'Expand';
+                    }
+                }
+
+                if (showMessage) {
+                    this.addLog('📝 Auto-minimized logs (click to expand)', 'info');
+                }
+            }
+        }
+    }
+
+    startExecution(executionType = 'command') {
+        this.logsState.isExecuting = true;
+        this.logsState.executionStartTime = Date.now();
+        this.logsState.manuallyCollapsed = false; // Reset manual collapse preference
+        this.clearAutoMinimizeTimeout();
+
+        // Auto-open logs for execution
+        this.autoOpenLogs();
+
+        this.addLog(`🚀 Starting ${executionType} execution...`, 'info');
+    }
+
+    endExecution(success = true) {
+        this.logsState.isExecuting = false;
+        const duration = this.logsState.executionStartTime ?
+            ((Date.now() - this.logsState.executionStartTime) / 1000).toFixed(1) : 'unknown';
+
+        const message = success ?
+            `✅ Execution completed successfully (${duration}s)` :
+            `❌ Execution failed (${duration}s)`;
+
+        this.addLog(message, success ? 'success' : 'error');
+
+        // Schedule auto-minimize after execution is done (wait 5 seconds)
+        setTimeout(() => {
+            this.scheduleAutoMinimizeIfIdle();
+        }, 5000);
+    }
+
     // --- Dashboard logic ---
     initDashboard() {
         // Initial load
@@ -237,9 +555,14 @@ class RemoteRunApp {
             // Store execution id for click
             div.dataset.execId = item.id;
             // Fetch and show machine host
-            const machine = this.machines.find(m => m.id === item.machine_id);
-            if (machine) {
-                div.querySelector('.machine-host').innerHTML = `<b>(${machine.host})</b>`;
+            if (item.machine_id === "local" && item.type === "terraform") {
+                // For terraform local executions, show "Local" as host
+                div.querySelector('.machine-host').innerHTML = `<b>(Local)</b>`;
+            } else {
+                const machine = this.machines.find(m => m.id === item.machine_id);
+                if (machine) {
+                    div.querySelector('.machine-host').innerHTML = `<b>(${machine.host})</b>`;
+                }
             }
             // Click to show details modal
             div.addEventListener('click', () => this.showExecutionDetails(item.id));
@@ -270,12 +593,95 @@ class RemoteRunApp {
             document.getElementById('detail-command').textContent = data.command || '';
             document.getElementById('detail-output').textContent = data.output || '';
             document.getElementById('detail-logs').textContent = data.logs || '';
+
+            // Store current execution data for downloads
+            this.currentExecutionData = data;
+
             this.showModal('execution-details-modal');
         } catch (e) {
             alert('Failed to load execution details');
         } finally {
             this.hideLoading();
         }
+    }
+
+    downloadExecutionData(type) {
+        if (!this.currentExecutionData) {
+            alert('No execution data available');
+            return;
+        }
+
+        let content = '';
+        let filename = '';
+        let mimeType = 'text/plain';
+
+        const executionInfo = {
+            machine: this.currentExecutionData.machine_name
+                ? `${this.currentExecutionData.machine_name} (${this.currentExecutionData.machine_host})`
+                : this.currentExecutionData.machine_host || this.currentExecutionData.machine_id,
+            type: this.currentExecutionData.type || 'unknown',
+            status: this.currentExecutionData.status || 'unknown',
+            started: this.currentExecutionData.started_at || 'unknown',
+            completed: this.currentExecutionData.completed_at || 'unknown',
+            duration: this.currentExecutionData.duration ? this.currentExecutionData.duration.toFixed(1) + 's' : 'unknown'
+        };
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+
+        // Create professional filename with machine info
+        const machineIdentifier = this.currentExecutionData.machine_name
+            ? this.currentExecutionData.machine_name.replace(/[^a-zA-Z0-9-_]/g, '_')
+            : (this.currentExecutionData.machine_host || this.currentExecutionData.machine_id || 'unknown')
+                .replace(/[^a-zA-Z0-9-_.]/g, '_');
+
+        const executionType = (this.currentExecutionData.type || 'command').replace(/[^a-zA-Z0-9-_]/g, '_');
+        const statusSuffix = this.currentExecutionData.status === 'success' ? 'SUCCESS' :
+            this.currentExecutionData.status === 'failed' ? 'FAILED' : 'UNKNOWN';
+
+        if (type === 'output') {
+            content = `# Execution Output Report\n`;
+            content += `# Generated: ${new Date().toLocaleString()}\n`;
+            content += `# RemoteRunLib Enterprise Edition\n`;
+            content += `${'='.repeat(60)}\n\n`;
+            content += `Machine: ${executionInfo.machine}\n`;
+            content += `Type: ${executionInfo.type}\n`;
+            content += `Status: ${executionInfo.status}\n`;
+            content += `Started: ${executionInfo.started}\n`;
+            content += `Completed: ${executionInfo.completed}\n`;
+            content += `Duration: ${executionInfo.duration}\n`;
+            content += `\n${'='.repeat(60)}\n`;
+            content += `# COMMAND/SCRIPT EXECUTED:\n${'='.repeat(60)}\n${this.currentExecutionData.command || 'N/A'}\n`;
+            content += `\n${'='.repeat(60)}\n`;
+            content += `# EXECUTION OUTPUT:\n${'='.repeat(60)}\n${this.currentExecutionData.output || 'No output available'}`;
+            filename = `RemoteRunLib_${machineIdentifier}_${executionType}_OUTPUT_${statusSuffix}_${timestamp}.txt`;
+        } else if (type === 'logs') {
+            content = `# Execution Logs Report\n`;
+            content += `# Generated: ${new Date().toLocaleString()}\n`;
+            content += `# RemoteRunLib Enterprise Edition\n`;
+            content += `${'='.repeat(60)}\n\n`;
+            content += `Machine: ${executionInfo.machine}\n`;
+            content += `Type: ${executionInfo.type}\n`;
+            content += `Status: ${executionInfo.status}\n`;
+            content += `Started: ${executionInfo.started}\n`;
+            content += `Completed: ${executionInfo.completed}\n`;
+            content += `Duration: ${executionInfo.duration}\n`;
+            content += `\n${'='.repeat(60)}\n`;
+            content += `# EXECUTION LOGS:\n${'='.repeat(60)}\n${this.currentExecutionData.logs || 'No logs available'}`;
+            filename = `RemoteRunLib_${machineIdentifier}_${executionType}_LOGS_${statusSuffix}_${timestamp}.txt`;
+        }
+
+        // Create and trigger download
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        this.addLog(`Downloaded ${type} for execution`, 'info');
     }
 
     formatDate(dt) {
@@ -323,7 +729,7 @@ class RemoteRunApp {
         if (this.pingInterval) clearInterval(this.pingInterval);
         this.pingInterval = setInterval(() => {
             this.pingAllMachines();
-        }, 120000); // 120,000 ms = 2 minutes
+        }, 5 * 60000); // 300,000 ms = 5 minutes
     }
 
     async pingAllMachines() {
@@ -538,6 +944,12 @@ class RemoteRunApp {
                     this.loadExistingFiles('ansible');
                 } else if (tabName === 'existing-tf') {
                     this.loadExistingFiles('terraform');
+                } else if (tabName === 'directories-python') {
+                    this.loadDirectories('python');
+                } else if (tabName === 'directories-ansible') {
+                    this.loadDirectories('ansible');
+                } else if (tabName === 'directories-tf') {
+                    this.loadDirectories('terraform');
                 }
             });
         });
@@ -863,6 +1275,14 @@ class RemoteRunApp {
             defaultOption.textContent = 'Choose a machine...';
             select.appendChild(defaultOption);
 
+            // Add Local option for Terraform
+            if (selectId === 'terraform-machine-select') {
+                const localOption = document.createElement('option');
+                localOption.value = 'local';
+                localOption.textContent = 'Local (Dashboard Host)';
+                select.appendChild(localOption);
+            }
+
             this.machines.forEach(machine => {
                 const option = document.createElement('option');
                 option.value = machine.id;
@@ -870,12 +1290,15 @@ class RemoteRunApp {
                 select.appendChild(option);
             });
 
-            // Restore previous selection if the machine still exists
-            if (prevValue && this.machines.some(m => m.id === prevValue)) {
+            // Restore previous selection if the machine still exists or is 'local'
+            if (selectId === 'terraform-machine-select' && (!prevValue || prevValue === 'local')) {
+                // Default to Local for Terraform
+                select.value = 'local';
+            } else if (prevValue && (prevValue === 'local' || this.machines.some(m => m.id === prevValue))) {
                 select.value = prevValue;
             } else {
-                // Set to empty (default option)
-                select.value = '';
+                // Set to empty (default option) for non-terraform or Local for terraform
+                select.value = selectId === 'terraform-machine-select' ? 'local' : '';
             }
         });
     } async saveMachine() {
@@ -1023,8 +1446,8 @@ class RemoteRunApp {
             return;
         }
 
+        this.startExecution('command');
         this.showLoading();
-        this.addLog(`Executing command on machine: ${command}`, 'info');
 
         try {
             const response = await fetch('/api/execute-command', {
@@ -1044,14 +1467,17 @@ class RemoteRunApp {
             if (result.success) {
                 this.addLog(`Command executed successfully`, 'success');
                 this.addLog(`Output: ${result.output}`, 'info');
+                this.endExecution(true);
             } else {
                 this.addLog(`Command failed: ${result.message}`, 'error');
+                this.endExecution(false);
             }
             // Refresh dashboard stats and history after execution
             this.loadDashboardStats();
             this.loadDashboardHistory();
         } catch (error) {
             this.addLog('Failed to execute command', 'error');
+            this.endExecution(false);
         } finally {
             this.hideLoading();
         }
@@ -1091,8 +1517,8 @@ class RemoteRunApp {
             return;
         }
 
+        this.startExecution('python');
         this.showLoading();
-        this.addLog(`Running Python script on machine`, 'info');
 
         try {
             const response = await fetch('/api/run-python', {
@@ -1112,13 +1538,16 @@ class RemoteRunApp {
             if (result.success) {
                 this.addLog(`Python script executed successfully`, 'success');
                 this.addLog(`Output: ${result.output}`, 'info');
+                this.endExecution(true);
             } else {
                 this.addLog(`Python script failed: ${result.message || 'Unknown error'}`, 'error');
                 alert('Failed to run Python script: ' + (result.message || 'Unknown error'));
+                this.endExecution(false);
             }
         } catch (error) {
             this.addLog('Failed to run Python script: ' + (error.message || error), 'error');
             alert('Failed to run Python script: ' + (error.message || error));
+            this.endExecution(false);
         } finally {
             this.hideLoading();
         }
@@ -1134,25 +1563,52 @@ class RemoteRunApp {
         }
 
         try {
-            const response = await fetch('/api/save-script', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    type: 'python',
-                    filename: filename,
-                    content: scriptContent
-                })
-            });
+            let response;
 
-            if (response.ok) {
-                this.addLog(`Python script saved: ${filename}`, 'success');
-                this.loadExistingFiles('python');
+            // Check if we're editing a directory file
+            if (this.editingContext && this.editingContext.isDirectoryFile && this.editingContext.type === 'python') {
+                // Save to directory using directory API
+                const { directory } = this.editingContext;
+                response = await fetch(`/api/directories/python/${directory}/files/${filename}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ content: scriptContent })
+                });
+
+                if (response.ok) {
+                    this.addLog(`Python script saved to directory '${directory}': ${filename}`, 'success');
+                    // Update editing context
+                    this.editingContext.originalContent = scriptContent;
+                    this.updateTabName('python-tab-name', `${filename} (saved)`);
+                    // Refresh directory contents
+                    this.loadDirectoryContents('python', directory);
+                } else {
+                    const error = await response.json();
+                    alert(`Failed to save to directory: ${error.error}`);
+                }
             } else {
-                const error = await response.json().catch(() => ({}));
-                this.addLog('Failed to save Python script' + (error.message ? ': ' + error.message : ''), 'error');
-                alert('Failed to save Python script' + (error.message ? ': ' + error.message : ''));
+                // Save as regular script file
+                response = await fetch('/api/save-script', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        type: 'python',
+                        filename: filename,
+                        content: scriptContent
+                    })
+                });
+
+                if (response.ok) {
+                    this.addLog(`Python script saved: ${filename}`, 'success');
+                    this.loadExistingFiles('python');
+                } else {
+                    const error = await response.json();
+                    alert(`Failed to save script: ${error.error}`);
+                }
             }
         } catch (error) {
             this.addLog('Failed to save Python script: ' + (error.message || error), 'error');
@@ -1179,25 +1635,52 @@ class RemoteRunApp {
         }
 
         try {
-            const response = await fetch('/api/save-script', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    type: 'ansible',
-                    filename: filename,
-                    content: scriptContent
-                })
-            });
+            let response;
 
-            if (response.ok) {
-                this.addLog(`Ansible script saved: ${filename}`, 'success');
-                this.loadExistingFiles('ansible');
+            // Check if we're editing a directory file
+            if (this.editingContext && this.editingContext.isDirectoryFile && this.editingContext.type === 'ansible') {
+                // Save to directory using directory API
+                const { directory } = this.editingContext;
+                response = await fetch(`/api/directories/ansible/${directory}/files/${filename}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ content: scriptContent })
+                });
+
+                if (response.ok) {
+                    this.addLog(`Ansible script saved to directory '${directory}': ${filename}`, 'success');
+                    // Update editing context
+                    this.editingContext.originalContent = scriptContent;
+                    this.updateTabName('ansible-tab-name', `${filename} (saved)`);
+                    // Refresh directory contents
+                    this.loadDirectoryContents('ansible', directory);
+                } else {
+                    const error = await response.json();
+                    alert(`Failed to save to directory: ${error.error}`);
+                }
             } else {
-                const error = await response.json().catch(() => ({}));
-                this.addLog('Failed to save Ansible script' + (error.message ? ': ' + error.message : ''), 'error');
-                alert('Failed to save Ansible script' + (error.message ? ': ' + error.message : ''));
+                // Save as regular script file
+                response = await fetch('/api/save-script', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        type: 'ansible',
+                        filename: filename,
+                        content: scriptContent
+                    })
+                });
+
+                if (response.ok) {
+                    this.addLog(`Ansible script saved: ${filename}`, 'success');
+                    this.loadExistingFiles('ansible');
+                } else {
+                    const error = await response.json();
+                    alert(`Failed to save script: ${error.error}`);
+                }
             }
         } catch (error) {
             this.addLog('Failed to save Ansible script: ' + (error.message || error), 'error');
@@ -1231,15 +1714,26 @@ class RemoteRunApp {
         if (activeMode === 'adhoc') {
             payload.module = document.getElementById('ansible-module').value;
             payload.args = document.getElementById('ansible-args').value;
+            payload.become = document.getElementById('ansible-adhoc-become').checked;
         } else {
             const scriptContent = document.getElementById('ansible-editor').value;
             const filename = document.getElementById('ansible-filename').value || 'playbook.yml';
             payload.script_content = scriptContent;
             payload.filename = filename;
+
+            // Check which playbook tab is active and get the become checkbox accordingly
+            const activeTab = document.querySelector('.upload-tabs .tab-btn.active').dataset.tab;
+            if (activeTab === 'upload-ansible') {
+                payload.become = document.getElementById('ansible-upload-become').checked;
+            } else if (activeTab === 'editor-ansible') {
+                payload.become = document.getElementById('ansible-editor-become').checked;
+            } else {
+                payload.become = false; // Default for other tabs
+            }
         }
 
+        this.startExecution(`ansible-${activeMode}`);
         this.showLoading();
-        this.addLog(`Running Ansible ${activeMode} on machine`, 'info');
 
         try {
             const response = await fetch('/api/run-ansible', {
@@ -1260,6 +1754,7 @@ class RemoteRunApp {
                 } else {
                     this.addLog(`Output: ${result.output}`, 'info');
                 }
+                this.endExecution(true);
             } else {
                 // Show error details if present
                 if (typeof result.output === 'object') {
@@ -1268,10 +1763,12 @@ class RemoteRunApp {
                     this.addLog(`Ansible ${activeMode} failed: ${result.message || 'Unknown error'}`, 'error');
                 }
                 alert('Failed to run Ansible: ' + (result.message || 'Unknown error'));
+                this.endExecution(false);
             }
         } catch (error) {
             this.addLog('Failed to run Ansible: ' + (error.message || error), 'error');
             alert('Failed to run Ansible: ' + (error.message || error));
+            this.endExecution(false);
         } finally {
             this.hideLoading();
         }
@@ -1281,42 +1778,85 @@ class RemoteRunApp {
         const machineId = document.getElementById('terraform-machine-select').value;
 
         if (!machineId) {
-            alert('Please select a machine');
+            alert('Please select a machine (used for tracking purposes - Terraform runs locally)');
             return;
         }
 
         const scriptContent = document.getElementById('terraform-editor').value;
         const filename = document.getElementById('terraform-filename').value || 'main.tf';
 
+        // Validate that we have content for non-init actions
+        if (action !== 'init' && !scriptContent.trim()) {
+            alert('Please enter Terraform configuration content before running ' + action);
+            return;
+        }
+
+        this.startExecution(`terraform-${action}`);
         this.showLoading();
-        this.addLog(`Running Terraform ${action} on machine`, 'info');
 
         try {
+            const payload = {
+                machine_id: machineId,
+                action: action,
+                filename: filename
+            };
+
+            // Only include script content for non-init actions or when we have content
+            if (scriptContent.trim()) {
+                payload.script_content = scriptContent;
+            }
+
             const response = await fetch('/api/run-terraform', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    machine_id: machineId,
-                    action: action,
-                    script_content: scriptContent,
-                    filename: filename
-                })
+                body: JSON.stringify(payload)
             });
 
             const result = await response.json();
 
             if (result.success) {
-                this.addLog(`Terraform ${action} executed successfully`, 'success');
-                this.addLog(`Output: ${result.output}`, 'info');
+                this.addLog(`Terraform ${action} executed successfully on dashboard host`, 'success');
+
+                // Display the actual output from Terraform
+                if (result.output) {
+                    // Format the output for better readability
+                    const formattedOutput = result.output.replace(/\n/g, '\n    ');
+                    this.addLog(`Terraform Output:\n    ${formattedOutput}`, 'info');
+                }
+
+                // Show appropriate success messages based on action
+                if (action === 'init') {
+                    this.addLog('✓ Terraform has been initialized locally. You can now run plan and apply.', 'success');
+                } else if (action === 'plan') {
+                    this.addLog('✓ Terraform plan completed locally. Review the changes above before applying.', 'success');
+                } else if (action === 'apply') {
+                    this.addLog('✓ Terraform apply completed locally. Infrastructure changes have been applied.', 'success');
+                }
+
+                // Refresh dashboard stats after successful execution
+                if (this.currentSection === 'dashboard') {
+                    this.loadDashboardStats();
+                    this.loadDashboardHistory();
+                }
+                this.endExecution(true);
             } else {
                 this.addLog(`Terraform ${action} failed: ${result.message || 'Unknown error'}`, 'error');
-                alert('Failed to run Terraform: ' + (result.message || 'Unknown error'));
+
+                // Display error output if available
+                if (result.output) {
+                    const formattedOutput = result.output.replace(/\n/g, '\n    ');
+                    this.addLog(`Error Details:\n    ${formattedOutput}`, 'error');
+                }
+
+                alert('Failed to run Terraform ' + action + ': ' + (result.message || 'Unknown error'));
+                this.endExecution(false);
             }
         } catch (error) {
             this.addLog('Failed to run Terraform: ' + (error.message || error), 'error');
             alert('Failed to run Terraform: ' + (error.message || error));
+            this.endExecution(false);
         } finally {
             this.hideLoading();
         }
@@ -1332,27 +1872,89 @@ class RemoteRunApp {
         }
 
         try {
-            const response = await fetch('/api/save-script', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    type: 'terraform',
-                    filename: filename,
-                    content: scriptContent
-                })
-            });
+            let response;
 
-            if (response.ok) {
-                this.addLog(`Terraform script saved: ${filename}`, 'success');
-                this.loadExistingFiles('terraform');
+            // Check if we're editing a directory file
+            if (this.editingContext && this.editingContext.isDirectoryFile && this.editingContext.type === 'terraform') {
+                // Save to directory using directory API
+                const { directory } = this.editingContext;
+                response = await fetch(`/api/directories/terraform/${directory}/files/${filename}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ content: scriptContent })
+                });
+
+                if (response.ok) {
+                    this.addLog(`Terraform script saved to directory '${directory}': ${filename}`, 'success');
+                    // Update editing context
+                    this.editingContext.originalContent = scriptContent;
+                    this.updateTabName('terraform-tab-name', `${filename} (saved)`);
+                    // Refresh directory contents
+                    this.loadDirectoryContents('terraform', directory);
+                } else {
+                    const error = await response.json();
+                    alert(`Failed to save to directory: ${error.error}`);
+                }
             } else {
-                this.addLog('Failed to save Terraform script', 'error');
+                // Save as regular script file
+                response = await fetch('/api/save-script', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        type: 'terraform',
+                        filename: filename,
+                        content: scriptContent
+                    })
+                });
+
+                if (response.ok) {
+                    this.addLog(`Terraform script saved: ${filename}`, 'success');
+                    this.loadExistingFiles('terraform');
+                } else {
+                    const error = await response.json();
+                    alert(`Failed to save script: ${error.error}`);
+                }
             }
         } catch (error) {
-            this.addLog('Failed to save Terraform script', 'error');
+            this.addLog('Failed to save Terraform script: ' + (error.message || error), 'error');
+            alert('Failed to save Terraform script: ' + (error.message || error));
         }
+    }
+
+    clearAnsible() {
+        // Clear playbook editor fields
+        document.getElementById('ansible-editor').value = '';
+        document.getElementById('ansible-filename').value = '';
+        document.getElementById('ansible-machine-select').value = '';
+        document.getElementById('ansible-file-input').value = '';
+        this.updateLineNumbers('ansible-editor');
+        this.updateTabName('ansible-tab-name', 'playbook.yml');
+
+        // Clear ad-hoc command fields
+        document.getElementById('ansible-module').value = '';
+        document.getElementById('ansible-args').value = '';
+
+        // Clear all become checkboxes
+        document.getElementById('ansible-adhoc-become').checked = false;
+        document.getElementById('ansible-upload-become').checked = false;
+        document.getElementById('ansible-editor-become').checked = false;
+
+        // Clear privilege control visual states
+        const privilegeControls = [
+            'ansible-adhoc-privilege-control',
+            'ansible-upload-privilege-control',
+            'ansible-editor-privilege-control'
+        ];
+        privilegeControls.forEach(controlId => {
+            const control = document.getElementById(controlId);
+            if (control) {
+                this.updatePrivilegeControlState(control, false);
+            }
+        });
     }
 
     clearTerraform() {
@@ -1437,10 +2039,41 @@ class RemoteRunApp {
             // file: { filename }
             const li = document.createElement('li');
             li.className = 'file-item';
-            li.textContent = file.filename;
-            li.title = file.filename;
-            li.addEventListener('click', () => this.loadFile(file.filename, type));
-            // Add delete button
+
+            // Create file info container
+            const fileInfo = document.createElement('div');
+            fileInfo.className = 'file-info';
+            fileInfo.textContent = file.filename;
+            fileInfo.title = file.filename;
+            fileInfo.addEventListener('click', () => this.loadFile(file.filename, type));
+
+            // Create action buttons container
+            const actionButtons = document.createElement('div');
+            actionButtons.className = 'file-actions';
+
+            // Edit button
+            const editBtn = document.createElement('button');
+            editBtn.className = 'edit-file-btn';
+            editBtn.innerHTML = '<i class="fas fa-edit"></i>';
+            editBtn.title = 'Edit file';
+            editBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.editSavedFile(file.filename, type);
+            });
+            actionButtons.appendChild(editBtn);
+
+            // Rename button
+            const renameBtn = document.createElement('button');
+            renameBtn.className = 'rename-file-btn';
+            renameBtn.innerHTML = '<i class="fas fa-tag"></i>';
+            renameBtn.title = 'Rename file';
+            renameBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.showRenameSavedFileDialog(file.filename, type);
+            });
+            actionButtons.appendChild(renameBtn);
+
+            // Delete button
             const delBtn = document.createElement('button');
             delBtn.className = 'delete-file-btn';
             delBtn.innerHTML = '<i class="fas fa-trash"></i>';
@@ -1449,7 +2082,10 @@ class RemoteRunApp {
                 e.stopPropagation();
                 this.deleteFile(file.filename, type);
             });
-            li.appendChild(delBtn);
+            actionButtons.appendChild(delBtn);
+
+            li.appendChild(fileInfo);
+            li.appendChild(actionButtons);
             list.appendChild(li);
         });
     }
@@ -1503,6 +2139,157 @@ class RemoteRunApp {
             }
         } catch (error) {
             this.addLog(`Failed to delete ${type} file`, 'error');
+        }
+    }
+
+    async editSavedFile(filename, type) {
+        try {
+            // Load file content for editing
+            const response = await fetch(`/api/files/${type}/${filename}`);
+            if (!response.ok) {
+                const error = await response.json();
+                alert(`Failed to load file: ${error.error}`);
+                return;
+            }
+
+            const fileData = await response.json();
+
+            // Switch to the appropriate section and load content into editor
+            this.switchSection(type);
+
+            // Set the content in the editor
+            const editorId = `${type}-editor`;
+            const filenameInput = `${type}-filename`;
+            const editor = document.getElementById(editorId);
+            const filenameInputElement = document.getElementById(filenameInput);
+
+            if (editor) {
+                editor.value = fileData.content;
+                this.updateLineNumbers(editorId);
+                this.autoResizeEditor(editorId);
+            }
+
+            if (filenameInputElement) {
+                filenameInputElement.value = fileData.name;
+            }
+
+            // Update tab name to show we're editing a file
+            const tabNameId = `${type}-tab-name`;
+            this.updateTabName(tabNameId, `${filename} (editing)`);
+
+            // Store editing context for saved files
+            this.savedFileEditingContext = {
+                type: type,
+                filename: filename,
+                originalContent: fileData.content
+            };
+
+            // Add save button specifically for editing saved files
+            this.showSavedFileEditingSaveButton(type);
+
+            // Switch to editor tab
+            const editorTabSelector = type === 'python' ? '[data-tab="editor"]' :
+                type === 'ansible' ? '[data-tab="editor-ansible"]' :
+                    '[data-tab="editor-tf"]';
+            const editorTab = document.querySelector(editorTabSelector);
+            if (editorTab) {
+                editorTab.click();
+            }
+
+            this.addLog(`Loaded '${filename}' for editing`, 'info');
+        } catch (error) {
+            this.addLog(`Error loading file for editing: ${error.message}`, 'error');
+        }
+    }
+
+    showSavedFileEditingSaveButton(type) {
+        // Add a special save button for editing saved files
+        const actionsContainer = document.querySelector(`#${type}-section .form-actions`);
+        if (actionsContainer && !document.getElementById(`save-editing-saved-${type}-btn`)) {
+            const saveEditingBtn = document.createElement('button');
+            saveEditingBtn.className = 'btn btn-success';
+            saveEditingBtn.id = `save-editing-saved-${type}-btn`;
+            saveEditingBtn.innerHTML = '<i class="fas fa-save"></i> Save Changes to File';
+            saveEditingBtn.onclick = () => this.saveSavedFileEdits();
+
+            // Insert at the beginning
+            actionsContainer.insertBefore(saveEditingBtn, actionsContainer.firstChild);
+        }
+    }
+
+    async saveSavedFileEdits() {
+        if (!this.savedFileEditingContext) {
+            alert('No saved file is currently being edited');
+            return;
+        }
+
+        const { type, filename } = this.savedFileEditingContext;
+        const editorId = `${type}-editor`;
+        const editor = document.getElementById(editorId);
+        const newContent = editor.value;
+
+        try {
+            const response = await fetch(`/api/files/${type}/${filename}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ content: newContent })
+            });
+
+            if (response.ok) {
+                this.addLog(`File '${filename}' saved successfully`, 'success');
+                this.savedFileEditingContext.originalContent = newContent;
+                this.updateTabName(`${type}-tab-name`, `${filename} (saved)`);
+
+                // Remove the editing save button
+                const saveEditingBtn = document.getElementById(`save-editing-saved-${type}-btn`);
+                if (saveEditingBtn) {
+                    saveEditingBtn.remove();
+                }
+
+                // Clear editing context
+                this.savedFileEditingContext = null;
+
+                // Refresh file list
+                this.loadExistingFiles(type);
+            } else {
+                const error = await response.json();
+                alert(`Failed to save file: ${error.error}`);
+            }
+        } catch (error) {
+            this.addLog(`Error saving file: ${error.message}`, 'error');
+        }
+    }
+
+    showRenameSavedFileDialog(filename, type) {
+        const newName = prompt(`Rename file '${filename}' to:`, filename);
+
+        if (newName && newName.trim() && newName.trim() !== filename) {
+            this.renameSavedFile(filename, type, newName.trim());
+        }
+    }
+
+    async renameSavedFile(oldName, type, newName) {
+        try {
+            const response = await fetch(`/api/files/${type}/${oldName}/rename`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ new_name: newName })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.addLog(`File renamed from '${oldName}' to '${newName}'`, 'success');
+                this.loadExistingFiles(type);
+            } else {
+                const error = await response.json();
+                alert(`Failed to rename file: ${error.error}`);
+            }
+        } catch (error) {
+            this.addLog(`Error renaming file: ${error.message}`, 'error');
         }
     }
 
@@ -1800,6 +2587,1278 @@ class RemoteRunApp {
             alert('Failed to save Ansible playbook: ' + (error.message || error));
         }
     }
+
+    // --- Directory Management Methods ---
+    initDirectoryManagement() {
+        // Initialize directory management for python, ansible and terraform
+        this.currentDirectories = {
+            python: null,
+            ansible: null,
+            terraform: null
+        };
+
+        // Python directory management
+        this.setupDirectoryManagement('python');
+
+        // Ansible directory management
+        this.setupDirectoryManagement('ansible');
+
+        // Terraform directory management  
+        this.setupDirectoryManagement('terraform');
+
+        // Setup enhanced project execution
+        this.setupProjectExecution();
+    }
+
+    setupDirectoryManagement(type) {
+        // Create directory button
+        const createBtn = document.getElementById(`create-${type}-dir-btn`);
+        if (createBtn) {
+            createBtn.addEventListener('click', () => this.createDirectory(type));
+        }
+
+        // Upload to directory button
+        const uploadBtn = document.getElementById(`${type}-upload-to-dir-btn`);
+        if (uploadBtn) {
+            uploadBtn.addEventListener('click', () => {
+                document.getElementById(`${type}-dir-file-input`).click();
+            });
+        }
+
+        // File input for directory uploads
+        const fileInput = document.getElementById(`${type}-dir-file-input`);
+        if (fileInput) {
+            fileInput.addEventListener('change', (e) => {
+                this.handleDirectoryFileUpload(type, e.target.files);
+            });
+        }
+
+        // Refresh directory button
+        const refreshBtn = document.getElementById(`${type}-refresh-dir-btn`);
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => {
+                if (this.currentDirectories[type]) {
+                    this.loadDirectoryContents(type, this.currentDirectories[type]);
+                }
+            });
+        }
+
+        // Close directory view button
+        const closeBtn = document.getElementById(`${type}-close-dir-btn`);
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => this.closeDirectoryView(type));
+        }
+
+        // Execute file button
+        const executeBtn = document.getElementById(`${type}-execute-file-btn`);
+        if (executeBtn) {
+            executeBtn.addEventListener('click', () => this.executeDirectoryFile(type));
+        }
+
+        // Select all button
+        const selectAllBtn = document.getElementById(`${type}-select-all-btn`);
+        if (selectAllBtn) {
+            selectAllBtn.addEventListener('click', () => this.selectAllFiles(type));
+        }
+
+        // Clear selection button
+        const clearSelectionBtn = document.getElementById(`${type}-clear-selection-btn`);
+        if (clearSelectionBtn) {
+            clearSelectionBtn.addEventListener('click', () => this.clearFileSelection(type));
+        }
+
+        // Execution mode radio buttons
+        const executionModeRadios = document.querySelectorAll(`input[name="${type}-exec-mode"]`);
+        executionModeRadios.forEach(radio => {
+            radio.addEventListener('change', () => this.updateExecutionControls(type));
+        });
+
+        // File selector dropdown change
+        const fileSelector = document.getElementById(`${type}-selected-file`);
+        if (fileSelector) {
+            fileSelector.addEventListener('change', () => this.updateExecutionControls(type));
+        }
+
+        // Terraform-specific directory action buttons
+        if (type === 'terraform') {
+            const initBtn = document.getElementById('terraform-dir-init-btn');
+            if (initBtn) {
+                initBtn.addEventListener('click', () => this.executeTerraformDirectoryAction('init'));
+            }
+
+            const planBtn = document.getElementById('terraform-dir-plan-btn');
+            if (planBtn) {
+                planBtn.addEventListener('click', () => this.executeTerraformDirectoryAction('plan'));
+            }
+
+            const applyBtn = document.getElementById('terraform-dir-apply-btn');
+            if (applyBtn) {
+                applyBtn.addEventListener('click', () => this.executeTerraformDirectoryAction('apply'));
+            }
+        }
+
+        // Enter key for directory name input
+        const dirNameInput = document.getElementById(`${type}-new-dir-name`);
+        if (dirNameInput) {
+            dirNameInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    this.createDirectory(type);
+                }
+            });
+        }
+
+        // Load initial directories
+        this.loadDirectories(type);
+    }
+
+    async loadDirectories(type) {
+        try {
+            const response = await fetch(`/api/directories/${type}`);
+            if (response.ok) {
+                const directories = await response.json();
+                this.renderDirectories(type, directories);
+            } else {
+                this.addLog(`Failed to load ${type} directories`, 'error');
+            }
+        } catch (error) {
+            this.addLog(`Error loading ${type} directories: ${error.message}`, 'error');
+        }
+    }
+
+    renderDirectories(type, directories) {
+        const grid = document.getElementById(`${type}-directories-grid`);
+        grid.innerHTML = '';
+
+        if (!directories || directories.length === 0) {
+            grid.innerHTML = `
+                <div class="empty-directory">
+                    <i class="fas fa-folder-open"></i>
+                    <p>No project directories found</p>
+                    <small>Create your first ${type} project directory above</small>
+                </div>
+            `;
+            return;
+        }
+
+        directories.forEach(dir => {
+            const card = document.createElement('div');
+            card.className = 'directory-card';
+            card.innerHTML = `
+                <div class="directory-card-header">
+                    <div class="directory-name">
+                        <i class="fas fa-folder"></i>
+                        ${dir.name}
+                    </div>
+                    <div class="directory-actions">
+                        <button class="directory-rename" onclick="app.showRenameDirectoryDialog('${type}', '${dir.name}')" title="Rename Directory">
+                            <i class="fas fa-tag"></i>
+                        </button>
+                        <button class="directory-delete" onclick="app.deleteDirectory('${type}', '${dir.name}')" title="Delete Directory">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="directory-info">
+                    <span>${dir.files_count} files</span>
+                    <span class="directory-meta">Modified: ${new Date(dir.modified * 1000).toLocaleDateString()}</span>
+                </div>
+            `;
+
+            card.addEventListener('click', () => this.openDirectory(type, dir.name));
+            grid.appendChild(card);
+        });
+    }
+
+    async createDirectory(type) {
+        const nameInput = document.getElementById(`${type}-new-dir-name`);
+        const dirName = nameInput.value.trim();
+
+        if (!dirName) {
+            alert('Please enter a directory name');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/directories/${type}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ name: dirName })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.addLog(`Directory '${result.name}' created successfully`, 'success');
+                nameInput.value = '';
+                this.loadDirectories(type);
+            } else {
+                const error = await response.json();
+                alert(`Failed to create directory: ${error.error}`);
+            }
+        } catch (error) {
+            this.addLog(`Error creating directory: ${error.message}`, 'error');
+            alert('Failed to create directory');
+        }
+    }
+
+    async deleteDirectory(type, dirName) {
+        if (!confirm(`Are you sure you want to delete directory '${dirName}' and all its files?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/directories/${type}/${dirName}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                this.addLog(`Directory '${dirName}' deleted successfully`, 'success');
+                this.loadDirectories(type);
+
+                // Close directory view if it was open
+                if (this.currentDirectories[type] === dirName) {
+                    this.closeDirectoryView(type);
+                }
+            } else {
+                const error = await response.json();
+                alert(`Failed to delete directory: ${error.error}`);
+            }
+        } catch (error) {
+            this.addLog(`Error deleting directory: ${error.message}`, 'error');
+            alert('Failed to delete directory');
+        }
+    }
+
+    async openDirectory(type, dirName) {
+        this.currentDirectories[type] = dirName;
+
+        // Update UI
+        document.getElementById(`${type}-current-directory`).textContent = `Directory: ${dirName}`;
+        document.getElementById(`${type}-directory-details`).style.display = 'block';
+
+        // Highlight selected directory
+        document.querySelectorAll(`#${type}-directories-grid .directory-card`).forEach(card => {
+            card.classList.remove('selected');
+        });
+        event.currentTarget.classList.add('selected');
+
+        // Load directory contents
+        this.loadDirectoryContents(type, dirName);
+    }
+
+    async loadDirectoryContents(type, dirName) {
+        try {
+            const response = await fetch(`/api/directories/${type}/${dirName}`);
+            if (response.ok) {
+                const data = await response.json();
+                this.renderDirectoryFiles(type, data.files);
+                this.updateFileSelector(type, data.files);
+            } else {
+                const error = await response.json();
+                this.addLog(`Failed to load directory contents: ${error.error}`, 'error');
+            }
+        } catch (error) {
+            this.addLog(`Error loading directory contents: ${error.message}`, 'error');
+        }
+    }
+
+    renderDirectoryFiles(type, files) {
+        const container = document.getElementById(`${type}-directory-files`);
+        container.innerHTML = '';
+
+        if (!files || files.length === 0) {
+            container.innerHTML = `
+                <div class="empty-directory">
+                    <i class="fas fa-file"></i>
+                    <p>No files in this directory</p>
+                    <small>Upload files using the Upload Files button above</small>
+                </div>
+            `;
+            this.updateExecutionControls(type);
+            return;
+        }
+
+        files.forEach(file => {
+            const fileItem = document.createElement('div');
+            fileItem.className = 'directory-file-item';
+            fileItem.dataset.filename = file.name;
+
+            const extension = file.extension.toLowerCase();
+            let iconClass = 'default';
+            let fileStatus = 'executable';
+
+            if (['.yml', '.yaml'].includes(extension)) {
+                iconClass = 'yml';
+            } else if (extension === '.tf') {
+                iconClass = 'tf';
+            } else if (extension === '.py') {
+                iconClass = 'py';
+            }
+
+            // Determine file status
+            const isReadonly = file.name.includes('README') || file.name.includes('.backup');
+            if (isReadonly) fileStatus = 'readonly';
+
+            fileItem.innerHTML = `
+                <input type="checkbox" class="file-checkbox" data-filename="${file.name}">
+                <div class="file-info-left">
+                    <div class="file-icon ${iconClass}">
+                        ${extension.replace('.', '').toUpperCase()}
+                    </div>
+                    <div>
+                        <div class="file-name">${file.name}</div>
+                        <div class="file-meta">
+                            ${this.formatFileSize(file.size)} • Modified: ${new Date(file.modified * 1000).toLocaleString()}
+                        </div>
+                        <div class="file-status ${fileStatus}">
+                            <i class="fas ${fileStatus === 'executable' ? 'fa-play-circle' : fileStatus === 'readonly' ? 'fa-lock' : 'fa-edit'}"></i>
+                            ${fileStatus === 'executable' ? 'Ready to execute' : fileStatus === 'readonly' ? 'Read-only file' : 'Modified'}
+                        </div>
+                    </div>
+                </div>
+                <div class="file-actions">
+                    <button class="file-action-btn" onclick="app.viewDirectoryFile('${type}', '${file.name}')" title="View">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <button class="file-action-btn edit" onclick="app.editDirectoryFile('${type}', '${file.name}')" title="Edit">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="file-action-btn rename" onclick="app.showRenameFileDialog('${type}', '${file.name}')" title="Rename">
+                        <i class="fas fa-tag"></i>
+                    </button>
+                    <button class="file-action-btn delete" onclick="app.deleteDirectoryFile('${type}', '${file.name}')" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+                <div class="file-selection-indicator">
+                    <i class="fas fa-check"></i>
+                </div>
+            `;
+
+            // Add event listeners
+            const checkbox = fileItem.querySelector('.file-checkbox');
+            checkbox.addEventListener('change', (e) => {
+                e.stopPropagation();
+                this.handleFileSelection(type, file.name, fileItem, checkbox.checked);
+            });
+
+            fileItem.addEventListener('click', (e) => {
+                if (!e.target.closest('.file-actions') && !e.target.closest('.file-checkbox')) {
+                    checkbox.checked = !checkbox.checked;
+                    this.handleFileSelection(type, file.name, fileItem, checkbox.checked);
+                }
+            });
+
+            container.appendChild(fileItem);
+        });
+
+        // Update the file selector dropdown
+        this.updateFileSelector(type, files);
+        // Update execution controls
+        this.updateExecutionControls(type);
+    }
+
+    updateFileSelector(type, files) {
+        const selector = document.getElementById(`${type}-selected-file`);
+        selector.innerHTML = '<option value="">Select a file...</option>';
+
+        files.forEach(file => {
+            const option = document.createElement('option');
+            option.value = file.name;
+            option.textContent = file.name;
+            selector.appendChild(option);
+        });
+    }
+
+    selectDirectoryFile(type, filename, fileItem) {
+        // Remove previous selection
+        document.querySelectorAll(`#${type}-directory-files .directory-file-item`).forEach(item => {
+            item.classList.remove('selected');
+        });
+
+        // Add selection to clicked item
+        fileItem.classList.add('selected');
+
+        // Update selector
+        document.getElementById(`${type}-selected-file`).value = filename;
+
+        // Update execution controls
+        this.updateExecutionControls(type);
+    }
+
+    handleFileSelection(type, filename, fileItem, isSelected) {
+        if (isSelected) {
+            fileItem.classList.add('selected');
+        } else {
+            fileItem.classList.remove('selected');
+        }
+
+        this.updateExecutionControls(type);
+        this.updateSelectionSummary(type);
+    }
+
+    updateSelectionSummary(type) {
+        const selectedFiles = document.querySelectorAll(`#${type}-directory-files .file-checkbox:checked`);
+        const countElement = document.getElementById(`${type}-selected-count`);
+        const count = selectedFiles.length;
+
+        if (countElement) {
+            countElement.textContent = `${count} file${count !== 1 ? 's' : ''} selected`;
+        }
+    }
+
+    updateExecutionControls(type) {
+        const executeBtn = document.getElementById(`${type}-execute-file-btn`);
+        const selectedFileDropdown = document.getElementById(`${type}-selected-file`);
+        const selectedFiles = document.querySelectorAll(`#${type}-directory-files .file-checkbox:checked`);
+        const singleMode = document.querySelector(`input[name="${type}-exec-mode"][value="single"]`);
+        const batchMode = document.querySelector(`input[name="${type}-exec-mode"][value="batch"]`);
+
+        if (!executeBtn) return;
+
+        let canExecute = false;
+        let buttonText = 'Execute Selected';
+
+        if (singleMode && singleMode.checked) {
+            // Single file mode - check if dropdown has selection
+            canExecute = selectedFileDropdown && selectedFileDropdown.value !== '';
+            buttonText = 'Execute File';
+        } else if (batchMode && batchMode.checked) {
+            // Batch mode - check if any files are selected
+            canExecute = selectedFiles.length > 0;
+            buttonText = `Execute ${selectedFiles.length} Files`;
+        }
+
+        executeBtn.disabled = !canExecute;
+        executeBtn.innerHTML = `<i class="fas fa-play"></i> ${buttonText}`;
+    }
+
+    async handleDirectoryFileUpload(type, files) {
+        if (!this.currentDirectories[type]) {
+            alert('Please select a directory first');
+            return;
+        }
+
+        const dirName = this.currentDirectories[type];
+        const filesData = [];
+
+        for (const file of files) {
+            const content = await this.readFileContent(file);
+            filesData.push({
+                name: file.name,
+                content: content
+            });
+        }
+
+        try {
+            const response = await fetch(`/api/directories/${type}/${dirName}/files`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ files: filesData })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.addLog(`Uploaded ${result.uploaded_files.length} files to '${dirName}'`, 'success');
+                this.loadDirectoryContents(type, dirName);
+            } else {
+                const error = await response.json();
+                alert(`Failed to upload files: ${error.error}`);
+            }
+        } catch (error) {
+            this.addLog(`Error uploading files: ${error.message}`, 'error');
+            alert('Failed to upload files');
+        }
+    }
+
+    async readFileContent(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = (e) => reject(e);
+            reader.readAsText(file);
+        });
+    }
+
+    async viewDirectoryFile(type, filename) {
+        const dirName = this.currentDirectories[type];
+        try {
+            const response = await fetch(`/api/directories/${type}/${dirName}/files/${filename}`);
+            if (response.ok) {
+                const data = await response.json();
+                // Show file content in a modal or editor
+                this.showFileContentModal(data.name, data.content);
+            } else {
+                const error = await response.json();
+                alert(`Failed to load file: ${error.error}`);
+            }
+        } catch (error) {
+            this.addLog(`Error loading file: ${error.message}`, 'error');
+        }
+    }
+
+    showFileContentModal(filename, content) {
+        // Create a simple modal to show file content
+        const modal = document.createElement('div');
+        modal.className = 'modal show';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 800px;">
+                <div class="modal-header">
+                    <h3><i class="fas fa-file"></i> ${filename}</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="code-editor-container">
+                        <div class="code-editor-wrapper">
+                            <pre style="background: #1e1e1e; color: #d4d4d4; padding: 20px; border-radius: 4px; max-height: 400px; overflow-y: auto; white-space: pre-wrap;">${content}</pre>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary modal-close-btn">Close</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Close modal handlers
+        modal.querySelector('.modal-close').addEventListener('click', () => {
+            document.body.removeChild(modal);
+        });
+        modal.querySelector('.modal-close-btn').addEventListener('click', () => {
+            document.body.removeChild(modal);
+        });
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                document.body.removeChild(modal);
+            }
+        });
+    }
+
+    async deleteDirectoryFile(type, filename) {
+        if (!confirm(`Are you sure you want to delete '${filename}'?`)) {
+            return;
+        }
+
+        const dirName = this.currentDirectories[type];
+        try {
+            const response = await fetch(`/api/directories/${type}/${dirName}/files/${filename}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                this.addLog(`File '${filename}' deleted successfully`, 'success');
+                this.loadDirectoryContents(type, dirName);
+            } else {
+                const error = await response.json();
+                alert(`Failed to delete file: ${error.error}`);
+            }
+        } catch (error) {
+            this.addLog(`Error deleting file: ${error.message}`, 'error');
+        }
+    }
+
+    async editDirectoryFile(type, filename) {
+        const dirName = this.currentDirectories[type];
+
+        // Debug logging and validation
+        console.log('editDirectoryFile called with:', { type, filename, dirName });
+        this.addLog(`Attempting to edit file: ${filename} in directory: ${dirName || 'none'}`, 'info');
+
+        if (!dirName) {
+            alert(`No ${type} directory is currently selected. Please open a directory first.`);
+            return;
+        }
+
+        try {
+            // Load file content
+            const response = await fetch(`/api/directories/${type}/${dirName}/files/${filename}`);
+            if (!response.ok) {
+                const error = await response.json();
+                alert(`Failed to load file: ${error.error}`);
+                return;
+            }
+
+            const fileData = await response.json();
+
+            // Switch to the appropriate section and load content into editor
+            this.switchSection(type);
+
+            // Switch to editor tab
+            const editorTabSelector = type === 'python' ? `#${type}-section [data-tab="editor"]` :
+                type === 'ansible' ? `#${type}-section [data-tab="editor-ansible"]` :
+                    `#${type}-section [data-tab="editor-tf"]`;
+            const editorTab = document.querySelector(editorTabSelector);
+            if (editorTab) {
+                editorTab.click();
+            } else {
+                this.addLog(`Warning: Could not find editor tab for ${type}`, 'warning');
+            }
+
+            // Small delay to ensure tab switching is complete
+            setTimeout(() => {
+                // Set the content in the editor
+                const editorId = `${type}-editor`;
+                const editor = document.getElementById(editorId);
+                if (editor) {
+                    editor.value = fileData.content;
+                    this.updateLineNumbers(editorId);
+                    this.autoResizeEditor(editorId);
+
+                    // CRITICAL FIX: Set the filename in the filename input field
+                    const filenameInputId = `${type}-filename`;
+                    const filenameInput = document.getElementById(filenameInputId);
+                    if (filenameInput) {
+                        filenameInput.value = filename;
+                        this.addLog(`Set filename in input field: ${filename}`, 'info');
+                    } else {
+                        this.addLog(`Warning: Could not find filename input field: ${filenameInputId}`, 'warning');
+                    }
+
+                    // Update tab name to show we're editing a file
+                    this.updateTabName(`${type}-tab-name`, `${filename} (editing)`);
+
+                    // Store editing context
+                    this.editingContext = {
+                        type: type,
+                        directory: dirName,
+                        filename: filename,
+                        originalContent: fileData.content,
+                        isDirectoryFile: true // Flag to indicate this is a directory file edit
+                    };
+
+                    // Add save button specifically for editing
+                    this.showEditingSaveButton(type);
+
+                    this.addLog(`Loaded '${filename}' for editing from directory '${dirName}'`, 'success');
+                } else {
+                    this.addLog(`Error: Could not find editor for ${type}`, 'error');
+                    alert(`Error: Could not find editor for ${type}. Please ensure the section is loaded properly.`);
+                }
+            }, 100);
+        } catch (error) {
+            this.addLog(`Error loading file for editing: ${error.message}`, 'error');
+            alert(`Error loading file for editing: ${error.message}`);
+        }
+    }
+
+    showEditingSaveButton(type) {
+        // Add a special save button for editing mode
+        const actionsContainer = document.querySelector(`#${type}-section .form-actions`);
+        if (actionsContainer && !document.getElementById(`save-editing-${type}-btn`)) {
+            const saveEditingBtn = document.createElement('button');
+            saveEditingBtn.className = 'btn btn-primary';
+            saveEditingBtn.id = `save-editing-${type}-btn`;
+            saveEditingBtn.innerHTML = '<i class="fas fa-save"></i> Save Changes';
+            saveEditingBtn.onclick = () => this.saveEditedFile();
+
+            // Insert at the beginning
+            actionsContainer.insertBefore(saveEditingBtn, actionsContainer.firstChild);
+        }
+    }
+
+    async saveEditedFile() {
+        if (!this.editingContext) {
+            alert('No file is currently being edited');
+            this.addLog('Save attempted but no file is being edited', 'warning');
+            return;
+        }
+
+        const { type, directory, filename } = this.editingContext;
+        const editorId = `${type}-editor`;
+        const editor = document.getElementById(editorId);
+
+        if (!editor) {
+            alert(`Could not find editor for ${type}`);
+            this.addLog(`Error: Could not find editor ${editorId}`, 'error');
+            return;
+        }
+
+        const newContent = editor.value;
+
+        this.addLog(`Saving file '${filename}' to directory '${directory}'...`, 'info');
+        console.log('saveEditedFile:', { type, directory, filename, contentLength: newContent.length });
+
+        try {
+            const response = await fetch(`/api/directories/${type}/${directory}/files/${filename}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ content: newContent })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.addLog(`✓ File '${filename}' saved successfully`, 'success');
+                this.editingContext.originalContent = newContent;
+                this.updateTabName(`${type}-tab-name`, `${filename} (saved)`);
+
+                // Remove the editing save button
+                const saveEditingBtn = document.getElementById(`save-editing-${type}-btn`);
+                if (saveEditingBtn) {
+                    saveEditingBtn.remove();
+                }
+
+                // Clear editing context
+                this.editingContext = null;
+
+                // Refresh directory contents to show the updated file
+                this.addLog(`Refreshing directory contents for '${directory}'...`, 'info');
+                this.loadDirectoryContents(type, directory);
+
+                alert(`File '${filename}' saved successfully!`);
+            } else {
+                const error = await response.json();
+                const errorMsg = `Failed to save file: ${error.error}`;
+                this.addLog(`✗ ${errorMsg}`, 'error');
+                alert(errorMsg);
+            }
+        } catch (error) {
+            const errorMsg = `Error saving file: ${error.message}`;
+            this.addLog(`✗ ${errorMsg}`, 'error');
+            alert(errorMsg);
+        }
+    }
+
+    showRenameFileDialog(type, filename) {
+        const dirName = this.currentDirectories[type];
+        const newName = prompt(`Rename file '${filename}' to:`, filename);
+
+        if (newName && newName.trim() && newName.trim() !== filename) {
+            this.renameFile(type, dirName, filename, newName.trim());
+        }
+    }
+
+    async renameFile(type, dirName, oldName, newName) {
+        try {
+            const response = await fetch(`/api/directories/${type}/${dirName}/files/${oldName}/rename`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ new_name: newName })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.addLog(`File renamed from '${oldName}' to '${newName}'`, 'success');
+                this.loadDirectoryContents(type, dirName);
+            } else {
+                const error = await response.json();
+                alert(`Failed to rename file: ${error.error}`);
+            }
+        } catch (error) {
+            this.addLog(`Error renaming file: ${error.message}`, 'error');
+        }
+    }
+
+    showRenameDirectoryDialog(type, dirName) {
+        const newName = prompt(`Rename directory '${dirName}' to:`, dirName);
+
+        if (newName && newName.trim() && newName.trim() !== dirName) {
+            this.renameDirectory(type, dirName, newName.trim());
+        }
+    }
+
+    async renameDirectory(type, oldName, newName) {
+        try {
+            const response = await fetch(`/api/directories/${type}/${oldName}/rename`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ new_name: newName })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.addLog(`Directory renamed from '${oldName}' to '${newName}'`, 'success');
+
+                // Update current directory if it was the one being renamed
+                if (this.currentDirectories[type] === oldName) {
+                    this.currentDirectories[type] = newName;
+                }
+
+                this.loadDirectories(type);
+            } else {
+                const error = await response.json();
+                alert(`Failed to rename directory: ${error.error}`);
+            }
+        } catch (error) {
+            this.addLog(`Error renaming directory: ${error.message}`, 'error');
+        }
+    }
+
+    async executeDirectoryFile(type) {
+        const machineSelect = document.getElementById(`${type}-machine-select`);
+        const customCommandInput = document.getElementById(`${type}-custom-command`);
+        const dirName = this.currentDirectories[type];
+
+        const singleMode = document.querySelector(`input[name="${type}-exec-mode"][value="single"]`);
+        const isSingleMode = singleMode && singleMode.checked;
+
+        if (!dirName) {
+            alert('No directory selected');
+            return;
+        }
+
+        let machineId = machineSelect ? machineSelect.value : 'local';
+        let customCommand = customCommandInput ? customCommandInput.value.trim() : '';
+        let filesToExecute = [];
+
+        if (isSingleMode) {
+            // Single file mode
+            const fileSelect = document.getElementById(`${type}-selected-file`);
+            const filename = fileSelect ? fileSelect.value : '';
+
+            if (!filename) {
+                alert('Please select a file to execute');
+                return;
+            }
+            filesToExecute = [filename];
+        } else {
+            // Batch mode
+            const selectedCheckboxes = document.querySelectorAll(`#${type}-directory-files .file-checkbox:checked`);
+            if (selectedCheckboxes.length === 0) {
+                alert('Please select at least one file to execute');
+                return;
+            }
+            filesToExecute = Array.from(selectedCheckboxes).map(cb => cb.dataset.filename);
+        }
+
+        if (!machineId) {
+            alert('Please select a machine');
+            return;
+        }
+
+        // Show execution status
+        const statusElement = document.getElementById(`${type}-execution-status`);
+        if (statusElement) {
+            statusElement.style.display = 'block';
+            statusElement.querySelector('span').textContent =
+                `Executing ${filesToExecute.length} file${filesToExecute.length > 1 ? 's' : ''}...`;
+        }
+
+        this.showLoading();
+        this.addLog(`Executing ${filesToExecute.length} file(s) from ${dirName} directory...`, 'info');
+
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const filename of filesToExecute) {
+            try {
+                this.addLog(`Executing: ${filename}`, 'info');
+
+                const response = await fetch(`/api/execute-directory/${type}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        machine_id: machineId,
+                        directory: dirName,
+                        filename: filename,
+                        custom_command: customCommand || null
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    successCount++;
+                    this.addLog(`✓ ${filename} executed successfully in ${result.execution_time?.toFixed(2) || 'N/A'}s`, 'success');
+                    if (result.output) {
+                        this.addLog(`Output: ${result.output}`, 'info');
+                    }
+                } else {
+                    failCount++;
+                    this.addLog(`✗ ${filename} execution failed: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                failCount++;
+                this.addLog(`✗ Error executing ${filename}: ${error.message}`, 'error');
+            }
+        }
+
+        // Hide execution status
+        if (statusElement) {
+            statusElement.style.display = 'none';
+        }
+
+        // Show summary
+        const totalFiles = filesToExecute.length;
+        if (successCount === totalFiles) {
+            this.addLog(`🎉 All ${totalFiles} file(s) executed successfully!`, 'success');
+        } else if (successCount > 0) {
+            this.addLog(`⚠️ Execution completed: ${successCount} succeeded, ${failCount} failed`, 'warning');
+        } else {
+            this.addLog(`❌ All executions failed`, 'error');
+            alert(`All file executions failed. Check the logs for details.`);
+        }
+
+        // Refresh dashboard stats and history
+        this.loadDashboardStats();
+        this.loadDashboardHistory();
+
+        this.hideLoading();
+    }
+
+    async executeTerraformDirectoryAction(action) {
+        const dirName = this.currentDirectories['terraform'];
+
+        if (!dirName) {
+            alert('No terraform directory selected');
+            return;
+        }
+
+        this.showLoading();
+        this.addLog(`Running terraform ${action} in directory: ${dirName}...`, 'info');
+
+        try {
+            const response = await fetch('/api/run-terraform', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    action: action,
+                    machine_id: 'local',  // Always use local for terraform
+                    filename: '',  // No specific file, works on directory
+                    script_content: '',  // No content, uses directory
+                    directory_name: dirName  // Pass the directory name
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.addLog(`Terraform ${action} completed successfully`, 'success');
+                this.addLog(`Output: ${result.output}`, 'info');
+
+                // Refresh dashboard stats and history
+                this.loadDashboardStats();
+                this.loadDashboardHistory();
+            } else {
+                this.addLog(`Terraform ${action} failed: ${result.message}`, 'error');
+                alert(`Terraform ${action} failed: ${result.message}`);
+            }
+        } catch (error) {
+            this.addLog(`Error running terraform ${action}: ${error.message}`, 'error');
+            alert(`Failed to run terraform ${action}`);
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    // --- Enhanced Project Execution Methods ---
+    async executeProject(projectType) {
+        const dirName = this.currentDirectories[projectType];
+        if (!dirName) {
+            alert(`No ${projectType} directory selected`);
+            return;
+        }
+
+        // Get execution parameters
+        const machineId = document.getElementById(`${projectType}-machine-select`).value;
+        const mainFile = document.getElementById(`${projectType}-main-file`).value;
+
+        // Handle different command type element names for different project types
+        let commandType;
+        if (projectType === 'terraform') {
+            const workflowElement = document.getElementById(`${projectType}-workflow-type`);
+            commandType = workflowElement ? workflowElement.value : 'full';
+        } else {
+            const commandTypeElement = document.getElementById(`${projectType}-command-type`);
+            commandType = commandTypeElement ? commandTypeElement.value : 'auto';
+        }
+
+        let customCommand = null;
+        let extraArgs = null;
+        let remote = true;
+
+        if (projectType === 'python') {
+            const location = document.querySelector('input[name="python-exec-location"]:checked').value;
+            remote = location === 'remote';
+
+            if (!remote) {
+                // For local execution, we don't need a machine
+            } else if (!machineId) {
+                alert('Please select a machine for remote execution');
+                return;
+            }
+        } else if (projectType === 'ansible') {
+            // Ansible always needs a target machine
+            if (!machineId) {
+                alert('Please select a target machine for Ansible execution');
+                return;
+            }
+            remote = false; // Ansible runs locally but targets remote
+        } else if (projectType === 'terraform') {
+            // Terraform runs locally
+            remote = false;
+        }
+
+        // Get command parameters
+        if (commandType === 'custom') {
+            customCommand = document.getElementById(`${projectType}-custom-full-command`).value.trim();
+            if (!customCommand) {
+                alert('Please enter a custom command');
+                return;
+            }
+        } else {
+            extraArgs = document.getElementById(`${projectType}-extra-args`).value.trim();
+
+            // For terraform, handle workflow type
+            if (projectType === 'terraform') {
+                const workflowType = document.getElementById('terraform-workflow-type').value;
+                if (workflowType !== 'full') {
+                    extraArgs = (extraArgs ? `${extraArgs} ` : '') + workflowType;
+                }
+            }
+        }
+
+        // For Ansible, check become option
+        let becomeOption = false;
+        if (projectType === 'ansible') {
+            becomeOption = document.getElementById('ansible-project-become').checked;
+            if (becomeOption) {
+                extraArgs = (extraArgs ? `${extraArgs} ` : '') + '--become';
+            }
+        }
+
+        this.showLoading();
+        this.startExecution('project'); // Start execution tracking and auto-open logs
+        this.addLog(`Executing ${projectType} project: ${dirName}${mainFile ? ` (main: ${mainFile})` : ''}...`, 'info');
+
+        try {
+            const payload = {
+                project_type: projectType,
+                directory_name: dirName,
+                main_file: mainFile || null,
+                custom_command: customCommand,
+                remote: remote,
+                extra_args: extraArgs,
+                machine_id: machineId || null
+            };
+
+            const response = await fetch('/api/execute-project', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.addLog(`✓ Project execution completed successfully`, 'success');
+                this.addLog(`Main file: ${result.main_file}`, 'info');
+                this.addLog(`Execution location: ${result.execution_location}`, 'info');
+                if (result.execution_time) {
+                    this.addLog(`Execution time: ${result.execution_time.toFixed(2)}s`, 'info');
+                }
+                if (result.output) {
+                    this.addLog(`Output:\n${result.output}`, 'success');
+                }
+
+                // Refresh dashboard stats
+                if (this.currentSection === 'dashboard') {
+                    this.loadDashboardStats();
+                    this.loadDashboardHistory();
+                }
+
+                this.endExecution(true); // End execution successfully
+
+            } else {
+                this.addLog(`✗ Project execution failed: ${result.message || result.error}`, 'error');
+                if (result.output) {
+                    this.addLog(`Output: ${result.output}`, 'info');
+                }
+                if (result.error) {
+                    this.addLog(`Error: ${result.error}`, 'error');
+                }
+                alert(`Project execution failed: ${result.message || result.error}`);
+                this.endExecution(false); // End execution with failure
+            }
+
+        } catch (error) {
+            this.addLog(`Error executing project: ${error.message}`, 'error');
+            alert(`Failed to execute project: ${error.message}`);
+            this.endExecution(false); // End execution with failure
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    async detectMainFile(projectType) {
+        const dirName = this.currentDirectories[projectType];
+        if (!dirName) {
+            alert(`No ${projectType} directory selected`);
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/detect-main-file', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    project_type: projectType,
+                    directory_name: dirName
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                const mainFileSelect = document.getElementById(`${projectType}-main-file`);
+
+                // Clear existing options
+                mainFileSelect.innerHTML = '<option value="">Auto-detect main file...</option>';
+
+                // Add detected main file as first option if found
+                if (result.main_file) {
+                    const mainOption = document.createElement('option');
+                    mainOption.value = result.main_file;
+                    mainOption.textContent = `${result.main_file} (detected)`;
+                    mainOption.selected = true;
+                    mainFileSelect.appendChild(mainOption);
+                }
+
+                // Add all suitable files
+                result.suitable_files.forEach(file => {
+                    if (file !== result.main_file) { // Don't duplicate the main file
+                        const option = document.createElement('option');
+                        option.value = file;
+                        option.textContent = file;
+                        mainFileSelect.appendChild(option);
+                    }
+                });
+
+                if (result.main_file) {
+                    this.addLog(`✓ Detected main file: ${result.main_file}`, 'success');
+                } else {
+                    this.addLog(`! No main file detected for ${projectType} project`, 'warning');
+                }
+
+            } else {
+                this.addLog(`Failed to detect main file: ${result.message}`, 'error');
+                alert(`Failed to detect main file: ${result.message}`);
+            }
+
+        } catch (error) {
+            this.addLog(`Error detecting main file: ${error.message}`, 'error');
+            alert(`Failed to detect main file: ${error.message}`);
+        }
+    }
+
+    setupProjectExecution() {
+        // Setup project execution for each type
+        ['python', 'ansible', 'terraform'].forEach(type => {
+            // Execute project button
+            const executeBtn = document.getElementById(`${type}-execute-project-btn`);
+            if (executeBtn) {
+                executeBtn.addEventListener('click', () => this.executeProject(type));
+            }
+
+            // Detect main file button
+            const detectBtn = document.getElementById(`${type}-detect-main-btn`);
+            if (detectBtn) {
+                detectBtn.addEventListener('click', () => this.detectMainFile(type));
+            }
+
+            // Command type selector - handle terraform's different naming
+            const commandTypeSelect = type === 'terraform' ?
+                document.getElementById('terraform-workflow-type') :
+                document.getElementById(`${type}-command-type`);
+            const customCommandInput = document.getElementById(`${type}-custom-full-command`);
+            const extraArgsInput = document.getElementById(`${type}-extra-args`);
+
+            if (commandTypeSelect && customCommandInput && extraArgsInput) {
+                commandTypeSelect.addEventListener('change', () => {
+                    const isCustom = type === 'terraform' ?
+                        commandTypeSelect.value === 'custom' :
+                        commandTypeSelect.value === 'custom';
+
+                    if (isCustom) {
+                        customCommandInput.style.display = 'block';
+                        extraArgsInput.style.display = 'none';
+                    } else {
+                        customCommandInput.style.display = 'none';
+                        extraArgsInput.style.display = 'block';
+                    }
+                });
+            }
+
+            // For Terraform, handle workflow type selector
+            if (type === 'terraform') {
+                const workflowSelect = document.getElementById('terraform-workflow-type');
+                const customCommandInput = document.getElementById('terraform-custom-full-command');
+                const extraArgsInput = document.getElementById('terraform-extra-args');
+
+                if (workflowSelect && customCommandInput && extraArgsInput) {
+                    workflowSelect.addEventListener('change', () => {
+                        if (workflowSelect.value === 'custom') {
+                            customCommandInput.style.display = 'block';
+                            extraArgsInput.style.display = 'none';
+                        } else {
+                            customCommandInput.style.display = 'none';
+                            extraArgsInput.style.display = 'block';
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    selectAllFiles(type) {
+        const checkboxes = document.querySelectorAll(`#${type}-directory-files .file-checkbox`);
+        checkboxes.forEach(checkbox => {
+            if (!checkbox.checked) {
+                checkbox.checked = true;
+                const fileItem = checkbox.closest('.directory-file-item');
+                this.handleFileSelection(type, checkbox.dataset.filename, fileItem, true);
+            }
+        });
+        this.updateSelectionSummary(type);
+    }
+
+    clearFileSelection(type) {
+        const checkboxes = document.querySelectorAll(`#${type}-directory-files .file-checkbox`);
+        checkboxes.forEach(checkbox => {
+            if (checkbox.checked) {
+                checkbox.checked = false;
+                const fileItem = checkbox.closest('.directory-file-item');
+                this.handleFileSelection(type, checkbox.dataset.filename, fileItem, false);
+            }
+        });
+        this.updateSelectionSummary(type);
+    }
+
+    closeDirectoryView(type) {
+        this.currentDirectories[type] = null;
+        document.getElementById(`${type}-directory-details`).style.display = 'none';
+
+        // Remove selection from directories
+        document.querySelectorAll(`#${type}-directories-grid .directory-card`).forEach(card => {
+            card.classList.remove('selected');
+        });
+    }
+
+    formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
 }
 
 // Initialize the application
@@ -1842,10 +3901,10 @@ document.addEventListener('keydown', (e) => {
                 document.getElementById('execute-command-btn').click();
                 break;
             case 'python':
-                document.getElementById('run-python-btn').click();
+                this.runPythonScript();
                 break;
             case 'ansible':
-                document.getElementById('run-ansible-btn').click();
+                this.runAnsible();
                 break;
             case 'terraform':
                 document.getElementById('terraform-apply-btn').click();

@@ -3,6 +3,10 @@ from remoterunlib.remoterunlib import SSHClient
 import sqlite3
 import os
 import uuid
+import datetime
+import time
+import tempfile
+import shutil
 
 class Dashboard:
     """A simple Flask-based dashboard to manage remote machines and execute commands."""
@@ -15,6 +19,9 @@ class Dashboard:
         caller_path = os.path.abspath(sys.argv[0])
         scripts_path = os.path.dirname(caller_path)
         self.db_path = os.path.join(scripts_path, "remoterunDB.sqlite3")
+        
+        # Set up base paths for directories
+        self.directories_base_path = os.path.join(scripts_path, "projects")
 
         # Connect to SQLite and ensure table exists
         self._init_db()
@@ -457,7 +464,22 @@ class Dashboard:
             except Exception as e:
                 return jsonify({"success": False, "output": "", "error": str(e)}), 500
 
-        # Terraform endpoints
+        # Terraform endpoints (legacy - kept for backwards compatibility)
+        @app.route("/api/terraform/init", methods=["POST"])
+        def terraform_init():
+            data = request.json
+            idx = int(data.get("machine_idx"))
+            work_dir = data.get("work_dir", "~")
+            m = self.machines[idx]
+            try:
+                client = SSHClient(m["host"], m["username"], m.get("password"), m.get("port", 22), m.get("key"))
+                client.login()
+                result = client.run_terraform_init(work_dir, remote=True)
+                client.close()
+                return jsonify({"success": result})
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e)}), 500
+
         @app.route("/api/terraform/plan", methods=["POST"])
         def terraform_plan():
             data = request.json
@@ -483,21 +505,6 @@ class Dashboard:
                 client = SSHClient(m["host"], m["username"], m.get("password"), m.get("port", 22), m.get("key"))
                 client.login()
                 result = client.run_terraform_apply(work_dir, remote=True)
-                client.close()
-                return jsonify({"success": result})
-            except Exception as e:
-                return jsonify({"success": False, "error": str(e)}), 500
-
-        @app.route("/api/terraform/destroy", methods=["POST"])
-        def terraform_destroy():
-            data = request.json
-            idx = int(data.get("machine_idx"))
-            work_dir = data.get("work_dir")
-            m = self.machines[idx]
-            try:
-                client = SSHClient(m["host"], m["username"], m.get("password"), m.get("port", 22), m.get("key"))
-                client.login()
-                result = client.run_terraform(["destroy"], work_dir, remote=True)
                 client.close()
                 return jsonify({"success": result})
             except Exception as e:
@@ -598,6 +605,7 @@ class Dashboard:
             playbook = data.get("playbook")
             script_content = data.get("script_content")
             filename = data.get("filename", "playbook.yml")
+            become = data.get("become", False)  # Get the become parameter
             # Find machine by id
             machine = None
             for m in self.machines:
@@ -622,7 +630,7 @@ class Dashboard:
                     # The run_ansible_playbook method will construct the proper ansible command
                     command = args  # Just pass the arguments directly
                     module = module or "command"  # Default to command if module is None/empty
-                    output = client.run_ansible_playbook(command, module=module)
+                    output = client.run_ansible_playbook(command, module=module, become=become)
                     exec_command = f"{module}: {args}"
                 else:
                     # Save playbook content to a temp file if provided
@@ -632,10 +640,10 @@ class Dashboard:
                             tmpf.write(script_content)
                             tmpf.flush()
                             playbook_path = tmpf.name
-                        output = client.run_ansible_playbook(playbook_path)
+                        output = client.run_ansible_playbook(playbook_path, become=become)
                         exec_command = filename
                     else:
-                        output = client.run_ansible_playbook(playbook)
+                        output = client.run_ansible_playbook(playbook, become=become)
                         exec_command = playbook
                 t1 = time.time()
                 client.close()
@@ -676,42 +684,160 @@ class Dashboard:
                 self._insert_execution(exec_data)
                 return jsonify({"success": False, "message": str(e)}), 500
 
-        # --- Unified Terraform endpoint (matches frontend) ---
+        # --- Enhanced Terraform endpoint with proper output handling ---
         @app.route("/api/run-terraform", methods=["POST"])
         def run_terraform_v2():
+            import datetime, time
             data = request.json
             machine_id = data.get("machine_id")
-            action = data.get("action")  # plan, apply, destroy
-            work_dir = data.get("work_dir", "~")
-            # Find machine by id
-            machine = None
-            for m in self.machines:
-                if str(m.get("id")) == str(machine_id):
-                    machine = m
-                    break
-            if not machine:
-                return jsonify({"success": False, "message": "Machine not found"}), 404
+            action = data.get("action")  # init, plan, apply
+            script_content = data.get("script_content", "")
+            filename = data.get("filename", "main.tf")
+            directory_name = data.get("directory_name")  # For directory-based execution
+            
+            # For terraform, we can accept "local" as machine_id or skip machine validation
+            if machine_id != "local":
+                # Find machine by id (used for execution tracking but Terraform runs locally)
+                machine = None
+                for m in self.machines:
+                    if str(m.get("id")) == str(machine_id):
+                        machine = m
+                        break
+                if not machine:
+                    return jsonify({"success": False, "message": "Machine not found"}), 404
+
+            # Validate action - only support init, plan, and apply (no destroy)
+            if action not in ["init", "plan", "apply"]:
+                return jsonify({"success": False, "message": "Invalid action. Supported: init, plan, apply"}), 400
+
+            started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            temp_dir = None
+            captured_output = ""
+            
             try:
-                client = SSHClient(
-                    machine["host"],
-                    machine["username"],
-                    machine.get("password"),
-                    machine.get("port", 22),
-                    machine.get("key"),
-                )
-                client.login()
-                if action == "plan":
-                    result = client.run_terraform_plan(work_dir, remote=True)
-                elif action == "apply":
-                    result = client.run_terraform_apply(work_dir, remote=True)
-                elif action == "destroy":
-                    result = client.run_terraform(["destroy"], work_dir, remote=True)
+                # Terraform runs locally on the dashboard host, not on remote machines
+                # This is similar to how Ansible works - local execution managing remote resources
+                
+                if directory_name:
+                    # Directory-based execution: use existing project directory
+                    work_dir = os.path.join(self.directories_base_path, 'terraform', directory_name)
+                    if not os.path.exists(work_dir):
+                        return jsonify({"success": False, "message": f"Directory '{directory_name}' not found"}), 404
+                elif script_content.strip():
+                    # Content-based execution: create temporary directory
+                    temp_dir = tempfile.mkdtemp(prefix="terraform_")
+                    tf_file_path = os.path.join(temp_dir, filename)
+                    with open(tf_file_path, 'w') as f:
+                        f.write(script_content)
+                    work_dir = temp_dir
                 else:
-                    return jsonify({"success": False, "message": "Invalid action"}), 400
-                client.close()
-                return jsonify({"success": True, "output": result})
+                    # For init action without content, use a default directory
+                    work_dir = tempfile.mkdtemp(prefix="terraform_init_")
+
+                t0 = time.time()
+                result = False
+                
+                # Use local Terraform execution methods (remote=False)
+                if action == "init":
+                    # Run terraform init locally
+                    success, output, error = self._run_terraform_init_local(work_dir)
+                    captured_output = output
+                    if error:
+                        captured_output += f"\nErrors: {error}"
+                    result = success
+                        
+                elif action == "plan":
+                    # For plan, we need content OR a directory
+                    if not script_content.strip() and not directory_name:
+                        return jsonify({"success": False, "message": "Terraform configuration content or directory is required for plan action"}), 400
+                    
+                    # Run terraform plan locally  
+                    success, output, error = self._run_terraform_plan_local(work_dir)
+                    captured_output = output
+                    if error:
+                        captured_output += f"\nErrors: {error}"
+                    result = success
+                    
+                elif action == "apply":
+                    # For apply, we need content OR a directory
+                    if not script_content.strip() and not directory_name:
+                        return jsonify({"success": False, "message": "Terraform configuration content or directory is required for apply action"}), 400
+                    
+                    # Run terraform apply locally
+                    success, output, error = self._run_terraform_apply_local(work_dir)
+                    captured_output = output
+                    if error:
+                        captured_output += f"\nErrors: {error}"
+                    result = success
+                
+                t1 = time.time()
+                
+                # Determine status based on result
+                status = "success" if result else "failed"
+                
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                duration = t1 - t0
+                
+                # Prepare command description
+                command_desc = f"terraform {action} (local execution)"
+                if directory_name:
+                    command_desc += f" - directory: {directory_name}"
+                elif script_content.strip() and filename:
+                    command_desc += f" - {filename}"
+                
+                # Insert execution history
+                # For terraform, always use "local" as machine_id since it runs locally
+                actual_machine_id = "local" if machine_id == "local" or not machine_id else machine_id
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": actual_machine_id,
+                    "type": "terraform",
+                    "status": status,
+                    "command": command_desc,
+                    "output": captured_output,
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": duration,
+                    "logs": "",
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({
+                    "success": status == "success",
+                    "output": captured_output,
+                    "message": f"Terraform {action} completed locally" if status == "success" else f"Terraform {action} failed"
+                })
+                
             except Exception as e:
-                return jsonify({"success": False, "message": str(e)}), 500
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                duration = 0
+                
+                # Insert failed execution history
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": "terraform",
+                    "status": "failed",
+                    "command": f"terraform {action} (local execution)",
+                    "output": captured_output,
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": duration,
+                    "logs": str(e),
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({"success": False, "message": f"Terraform {action} failed: {str(e)}"}), 500
+            
+            finally:
+                # Clean up temporary directory
+                if temp_dir and os.path.exists(temp_dir):
+                    import shutil
+                    try:
+                        shutil.rmtree(temp_dir)
+                    except Exception as cleanup_error:
+                        print(f"Warning: Failed to clean up temp directory {temp_dir}: {cleanup_error}")
+
         # --- Save script endpoint (for frontend) ---
 
         @app.route("/api/save-script", methods=["POST"])
@@ -751,9 +877,9 @@ class Dashboard:
                     files.append({"filename": fname})
             return jsonify(files)
 
-        @app.route("/api/files/<script_type>/<filename>", methods=["GET"])
+        @app.route("/api/files/<script_type>/<filename>", methods=["GET", "PUT", "DELETE"])
         def load_file(script_type, filename):
-            # Load content of a specific file
+            # Load content, update content, or delete a specific file
             try:
                 caller_path = os.path.abspath(sys.argv[0])
                 scripts_path = os.path.dirname(caller_path)
@@ -763,17 +889,824 @@ class Dashboard:
                 # Security check: ensure the file is within the expected directory
                 if not os.path.abspath(file_path).startswith(os.path.abspath(base_dir)):
                     return jsonify({"error": "Invalid file path"}), 400
+                
+                if request.method == "GET":
+                    # Load file content
+                    if not os.path.exists(file_path):
+                        return jsonify({"error": "File not found"}), 404
+                        
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        
+                    return jsonify({
+                        "name": filename,
+                        "content": content,
+                        "type": script_type
+                    })
+                
+                elif request.method == "PUT":
+                    # Update file content
+                    data = request.json
+                    new_content = data.get("content", "")
                     
+                    if not os.path.exists(file_path):
+                        return jsonify({"error": "File not found"}), 404
+                    
+                    # Create backup before editing
+                    backup_path = file_path + ".backup"
+                    if os.path.exists(file_path):
+                        import shutil
+                        shutil.copy2(file_path, backup_path)
+                    
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+                    
+                    return jsonify({
+                        "message": f"File '{filename}' updated successfully",
+                        "name": filename,
+                        "type": script_type
+                    })
+                
+                elif request.method == "DELETE":
+                    # Delete file
+                    if not os.path.exists(file_path):
+                        return jsonify({"error": "File not found"}), 404
+                    
+                    # Create backup before deletion
+                    backup_dir = os.path.join(base_dir, ".backup")
+                    os.makedirs(backup_dir, exist_ok=True)
+                    backup_path = os.path.join(backup_dir, f"{filename}.{int(time.time())}")
+                    import shutil
+                    shutil.copy2(file_path, backup_path)
+                    
+                    os.remove(file_path)
+                    return jsonify({"message": f"File '{filename}' deleted successfully"})
+                    
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @app.route("/api/files/<script_type>/<filename>/rename", methods=["PUT"])
+        def rename_saved_file(script_type, filename):
+            """Rename a saved file."""
+            try:
+                caller_path = os.path.abspath(sys.argv[0])
+                scripts_path = os.path.dirname(caller_path)
+                base_dir = os.path.join(scripts_path, "scripts", script_type)
+                old_file_path = os.path.join(base_dir, filename)
+                
+                # Security check
+                if not os.path.abspath(old_file_path).startswith(os.path.abspath(base_dir)):
+                    return jsonify({"error": "Invalid file path"}), 400
+                
+                if not os.path.exists(old_file_path):
+                    return jsonify({"error": "File not found"}), 404
+                
+                data = request.json
+                new_name = data.get("new_name", "").strip()
+                
+                if not new_name:
+                    return jsonify({"error": "New file name is required"}), 400
+                
+                # Sanitize new filename
+                import re
+                new_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', new_name)
+                
+                new_file_path = os.path.join(base_dir, new_name)
+                
+                if os.path.exists(new_file_path):
+                    return jsonify({"error": "File with new name already exists"}), 400
+                
+                os.rename(old_file_path, new_file_path)
+                
+                return jsonify({
+                    "message": f"File renamed from '{filename}' to '{new_name}'",
+                    "old_name": filename,
+                    "new_name": new_name,
+                    "type": script_type
+                })
+                
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        # --- Directory Management Endpoints ---
+        @app.route("/api/directories/<script_type>", methods=["GET", "POST"])
+        def manage_directories(script_type):
+            """Get all directories or create a new directory for script type."""
+            try:
+                # Use the instance's directories_base_path
+                base_dir = os.path.join(self.directories_base_path, script_type)
+                
+                if request.method == "GET":
+                    # List all directories
+                    directories = []
+                    if os.path.exists(base_dir):
+                        for item in os.listdir(base_dir):
+                            item_path = os.path.join(base_dir, item)
+                            if os.path.isdir(item_path):
+                                # Get directory info
+                                files_count = len([f for f in os.listdir(item_path) 
+                                                 if os.path.isfile(os.path.join(item_path, f))])
+                                directories.append({
+                                    "name": item,
+                                    "files_count": files_count,
+                                    "created": os.path.getctime(item_path),
+                                    "modified": os.path.getmtime(item_path)
+                                })
+                    return jsonify(directories)
+                
+                elif request.method == "POST":
+                    # Create new directory
+                    data = request.json
+                    dir_name = data.get("name", "").strip()
+                    
+                    if not dir_name:
+                        return jsonify({"error": "Directory name is required"}), 400
+                    
+                    # Sanitize directory name
+                    import re
+                    dir_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', dir_name)
+                    
+                    dir_path = os.path.join(base_dir, dir_name)
+                    
+                    if os.path.exists(dir_path):
+                        return jsonify({"error": "Directory already exists"}), 400
+                    
+                    os.makedirs(dir_path, exist_ok=True)
+                    
+                    # Create a README file with project info
+                    readme_content = f"""# {dir_name.replace('_', ' ').title()} Project
+
+## Project Information
+- **Type**: {script_type.title()}
+- **Created**: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+- **Platform**: RemoteRunLib Enterprise
+
+## Directory Structure
+This directory contains {script_type} files and configurations.
+
+## Usage Instructions
+1. Upload your {script_type} files to this directory
+2. Select files from the directory view
+3. Execute using the built-in run commands
+
+---
+*Generated by RemoteRunLib Enterprise Edition*
+"""
+                    with open(os.path.join(dir_path, "README.md"), "w", encoding="utf-8") as f:
+                        f.write(readme_content)
+                    
+                    return jsonify({
+                        "name": dir_name,
+                        "message": f"Directory '{dir_name}' created successfully"
+                    })
+                    
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @app.route("/api/directories/<script_type>/<dir_name>", methods=["GET", "DELETE"])
+        def manage_directory(script_type, dir_name):
+            """Get directory contents or delete directory."""
+            try:
+                # Use the instance's directories_base_path
+                base_dir = os.path.join(self.directories_base_path, script_type)
+                dir_path = os.path.join(base_dir, dir_name)
+                
+                # Security check
+                if not os.path.abspath(dir_path).startswith(os.path.abspath(base_dir)):
+                    return jsonify({"error": "Invalid directory path"}), 400
+                
+                if request.method == "GET":
+                    # Get directory contents
+                    if not os.path.exists(dir_path):
+                        return jsonify({"error": "Directory not found"}), 404
+                    
+                    files = []
+                    for item in os.listdir(dir_path):
+                        item_path = os.path.join(dir_path, item)
+                        if os.path.isfile(item_path):
+                            file_size = os.path.getsize(item_path)
+                            files.append({
+                                "name": item,
+                                "size": file_size,
+                                "modified": os.path.getmtime(item_path),
+                                "extension": os.path.splitext(item)[1]
+                            })
+                    
+                    return jsonify({
+                        "directory": dir_name,
+                        "files": files,
+                        "total_files": len(files)
+                    })
+                
+                elif request.method == "DELETE":
+                    # Delete directory
+                    if not os.path.exists(dir_path):
+                        return jsonify({"error": "Directory not found"}), 404
+                    
+                    import shutil
+                    shutil.rmtree(dir_path)
+                    return jsonify({"message": f"Directory '{dir_name}' deleted successfully"})
+                    
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @app.route("/api/directories/<script_type>/<dir_name>/files", methods=["POST"])
+        def upload_to_directory(script_type, dir_name):
+            """Upload files to a specific directory."""
+            try:
+                # Use the instance's directories_base_path
+                base_dir = os.path.join(self.directories_base_path, script_type)
+                dir_path = os.path.join(base_dir, dir_name)
+                
+                # Security check
+                if not os.path.abspath(dir_path).startswith(os.path.abspath(base_dir)):
+                    return jsonify({"error": "Invalid directory path"}), 400
+                
+                # Create directory if it doesn't exist
+                os.makedirs(dir_path, exist_ok=True)
+                
+                data = request.json
+                files_data = data.get("files", [])
+                
+                uploaded_files = []
+                for file_data in files_data:
+                    filename = file_data.get("name", "").strip()
+                    content = file_data.get("content", "")
+                    
+                    if not filename:
+                        continue
+                    
+                    # Sanitize filename
+                    import re
+                    filename = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', filename)
+                    
+                    file_path = os.path.join(dir_path, filename)
+                    
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    
+                    uploaded_files.append(filename)
+                
+                return jsonify({
+                    "uploaded_files": uploaded_files,
+                    "message": f"Uploaded {len(uploaded_files)} files to '{dir_name}'"
+                })
+                
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @app.route("/api/directories/<script_type>/<dir_name>/files/<filename>", methods=["GET", "PUT", "DELETE"])
+        def manage_directory_file(script_type, dir_name, filename):
+            """Get file content, update file content, or delete file from directory."""
+            try:
+                # Use the instance's directories_base_path
+                base_dir = os.path.join(self.directories_base_path, script_type)
+                dir_path = os.path.join(base_dir, dir_name)
+                file_path = os.path.join(dir_path, filename)
+                
+                # Security check
+                if not os.path.abspath(file_path).startswith(os.path.abspath(base_dir)):
+                    return jsonify({"error": "Invalid file path"}), 400
+                
+                if request.method == "GET":
+                    # Get file content
+                    if not os.path.exists(file_path):
+                        return jsonify({"error": "File not found"}), 404
+                    
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    
+                    return jsonify({
+                        "name": filename,
+                        "content": content,
+                        "directory": dir_name
+                    })
+                
+                elif request.method == "PUT":
+                    # Update file content
+                    data = request.json
+                    new_content = data.get("content", "")
+                    
+                    # Create directory if it doesn't exist
+                    os.makedirs(dir_path, exist_ok=True)
+                    
+                    # Create backup before editing if file exists
+                    if os.path.exists(file_path):
+                        backup_path = file_path + ".backup"
+                        import shutil
+                        shutil.copy2(file_path, backup_path)
+                    
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+                    
+                    return jsonify({
+                        "message": f"File '{filename}' updated successfully",
+                        "name": filename,
+                        "directory": dir_name
+                    })
+                
+                elif request.method == "DELETE":
+                    # Delete file
+                    if not os.path.exists(file_path):
+                        return jsonify({"error": "File not found"}), 404
+                    
+                    os.remove(file_path)
+                    return jsonify({"message": f"File '{filename}' deleted successfully"})
+                    
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @app.route("/api/directories/<script_type>/<dir_name>/rename", methods=["PUT"])
+        def rename_directory(script_type, dir_name):
+            """Rename a directory."""
+            try:
+                # Use the instance's directories_base_path
+                base_dir = os.path.join(self.directories_base_path, script_type)
+                old_dir_path = os.path.join(base_dir, dir_name)
+                
+                # Security check
+                if not os.path.abspath(old_dir_path).startswith(os.path.abspath(base_dir)):
+                    return jsonify({"error": "Invalid directory path"}), 400
+                
+                if not os.path.exists(old_dir_path):
+                    return jsonify({"error": "Directory not found"}), 404
+                
+                data = request.json
+                new_name = data.get("new_name", "").strip()
+                
+                if not new_name:
+                    return jsonify({"error": "New directory name is required"}), 400
+                
+                # Sanitize new directory name
+                import re
+                new_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', new_name)
+                
+                new_dir_path = os.path.join(base_dir, new_name)
+                
+                if os.path.exists(new_dir_path):
+                    return jsonify({"error": "Directory with new name already exists"}), 400
+                
+                os.rename(old_dir_path, new_dir_path)
+                
+                return jsonify({
+                    "message": f"Directory renamed from '{dir_name}' to '{new_name}'",
+                    "old_name": dir_name,
+                    "new_name": new_name
+                })
+                
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @app.route("/api/directories/<script_type>/<dir_name>/files/<filename>/rename", methods=["PUT"])
+        def rename_file(script_type, dir_name, filename):
+            """Rename a file in a directory."""
+            try:
+                # Use the instance's directories_base_path
+                base_dir = os.path.join(self.directories_base_path, script_type)
+                dir_path = os.path.join(base_dir, dir_name)
+                old_file_path = os.path.join(dir_path, filename)
+                
+                # Security check
+                if not os.path.abspath(old_file_path).startswith(os.path.abspath(base_dir)):
+                    return jsonify({"error": "Invalid file path"}), 400
+                
+                if not os.path.exists(old_file_path):
+                    return jsonify({"error": "File not found"}), 404
+                
+                data = request.json
+                new_name = data.get("new_name", "").strip()
+                
+                if not new_name:
+                    return jsonify({"error": "New file name is required"}), 400
+                
+                # Sanitize new filename
+                import re
+                new_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', new_name)
+                
+                new_file_path = os.path.join(dir_path, new_name)
+                
+                if os.path.exists(new_file_path):
+                    return jsonify({"error": "File with new name already exists"}), 400
+                
+                os.rename(old_file_path, new_file_path)
+                
+                return jsonify({
+                    "message": f"File renamed from '{filename}' to '{new_name}'",
+                    "old_name": filename,
+                    "new_name": new_name,
+                    "directory": dir_name
+                })
+                
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        # --- Enhanced Project Directory Execution ---
+        @app.route("/api/execute-project", methods=["POST"])
+        def execute_project():
+            """Execute a project directory with main file selection."""
+            data = request.json
+            machine_id = data.get("machine_id")
+            project_type = data.get("project_type", "python")  # python, ansible, terraform
+            directory_name = data.get("directory_name")
+            main_file = data.get("main_file")  # Optional - will auto-detect if not provided
+            custom_command = data.get("custom_command")  # Optional custom execution command
+            remote = data.get("remote", True)  # Execute remotely by default
+            extra_args = data.get("extra_args")  # Optional extra arguments
+            
+            if not directory_name:
+                return jsonify({"success": False, "message": "Directory name is required"}), 400
+            
+            # Build project directory path
+            project_dir = os.path.join(self.directories_base_path, project_type, directory_name)
+            
+            if not os.path.exists(project_dir):
+                return jsonify({"success": False, "message": f"Project directory not found: {directory_name}"}), 404
+            
+            started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                if remote and machine_id:
+                    # Find machine for remote execution
+                    machine = None
+                    for m in self.machines:
+                        if str(m.get("id")) == str(machine_id):
+                            machine = m
+                            break
+                    if not machine:
+                        return jsonify({"success": False, "message": "Machine not found"}), 404
+                    
+                    # Create SSH client and execute remotely
+                    client = SSHClient(
+                        machine["host"],
+                        machine["username"],
+                        machine.get("password"),
+                        machine.get("port", 22),
+                        machine.get("key"),
+                    )
+                    client.login()
+                    
+                    result = client.run_project_directory(
+                        project_dir=project_dir,
+                        main_file=main_file,
+                        project_type=project_type,
+                        custom_command=custom_command,
+                        remote=True,
+                        extra_args=extra_args
+                    )
+                    
+                    client.close()
+                    
+                elif project_type == "ansible":
+                    # Ansible always runs locally (on dashboard host) targeting remote machines
+                    # Create a dummy client to use the project execution logic
+                    if machine_id:
+                        machine = None
+                        for m in self.machines:
+                            if str(m.get("id")) == str(machine_id):
+                                machine = m
+                                break
+                        if not machine:
+                            return jsonify({"success": False, "message": "Machine not found for Ansible targeting"}), 404
+                        
+                        # Create client for inventory generation but don't use for execution
+                        client = SSHClient(
+                            machine["host"],
+                            machine["username"],
+                            machine.get("password"),
+                            machine.get("port", 22),
+                            machine.get("key"),
+                        )
+                        
+                        # Use ansible-specific execution for local running
+                        result = self._execute_ansible_project_local(
+                            project_dir, main_file, custom_command, extra_args, client
+                        )
+                    else:
+                        return jsonify({"success": False, "message": "Machine selection required for Ansible execution"}), 400
+                        
+                else:
+                    # Local execution (for terraform and other types)
+                    client = SSHClient("localhost", "local")  # Dummy client for local execution
+                    result = client.run_project_directory(
+                        project_dir=project_dir,
+                        main_file=main_file,
+                        project_type=project_type,
+                        custom_command=custom_command,
+                        remote=False,
+                        extra_args=extra_args
+                    )
+                
+                # Log execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id or "local",
+                    "type": f"{project_type}_project",
+                    "status": "success" if result.get("success") else "failed",
+                    "command": f"{directory_name}/{result.get('main_file', main_file or 'auto-detected')}",
+                    "output": result.get("output", ""),
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": result.get("execution_time", 0),
+                    "logs": f"Project execution - Location: {result.get('execution_location', 'unknown')}",
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({
+                    "success": result.get("success", False),
+                    "message": "Project executed successfully" if result.get("success") else "Project execution failed",
+                    "output": result.get("output", ""),
+                    "error": result.get("error", ""),
+                    "main_file": result.get("main_file"),
+                    "execution_location": result.get("execution_location"),
+                    "execution_time": result.get("execution_time"),
+                    "command": result.get("command"),
+                    "directory": directory_name
+                })
+                
+            except Exception as e:
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id or "local",
+                    "type": f"{project_type}_project",
+                    "status": "failed",
+                    "command": f"{directory_name}/{main_file or 'unknown'}",
+                    "output": "",
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": 0,
+                    "logs": f"Project execution failed: {str(e)}",
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({"success": False, "message": f"Project execution failed: {str(e)}"}), 500
+
+        @app.route("/api/detect-main-file", methods=["POST"])
+        def detect_main_file():
+            """Detect the main file for a project directory."""
+            data = request.json
+            project_type = data.get("project_type", "python")
+            directory_name = data.get("directory_name")
+            
+            if not directory_name:
+                return jsonify({"success": False, "message": "Directory name is required"}), 400
+            
+            project_dir = os.path.join(self.directories_base_path, project_type, directory_name)
+            
+            if not os.path.exists(project_dir):
+                return jsonify({"success": False, "message": f"Project directory not found: {directory_name}"}), 404
+            
+            # Create a dummy client to use the detection logic
+            client = SSHClient("localhost", "local")
+            main_file = client._detect_main_file(project_dir, project_type)
+            
+            # Also return list of all suitable files for user selection
+            suitable_files = []
+            try:
+                for file in os.listdir(project_dir):
+                    if project_type == "python" and file.endswith('.py'):
+                        suitable_files.append(file)
+                    elif project_type == "ansible" and file.endswith(('.yml', '.yaml')):
+                        suitable_files.append(file)
+                    elif project_type == "terraform" and file.endswith('.tf'):
+                        suitable_files.append(file)
+            except Exception as e:
+                print(f"Error listing files: {e}")
+            
+            return jsonify({
+                "success": True,
+                "main_file": main_file,
+                "suitable_files": sorted(suitable_files),
+                "project_type": project_type,
+                "directory": directory_name
+            })
+
+        @app.route("/api/execute-directory/<script_type>", methods=["POST"])
+        def execute_directory_file(script_type):
+            """Execute a file from a directory with built-in commands."""
+            try:
+                data = request.json
+                machine_id = data.get("machine_id")
+                dir_name = data.get("directory")
+                filename = data.get("filename")
+                custom_command = data.get("custom_command")
+                
+                if not machine_id or not dir_name or not filename:
+                    return jsonify({"error": "Missing required parameters"}), 400
+                
+                # Find machine
+                machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+                if not machine:
+                    return jsonify({"error": "Machine not found"}), 404
+                
+                # Use the instance's directories_base_path
+                base_dir = os.path.join(self.directories_base_path, script_type)
+                dir_path = os.path.join(base_dir, dir_name)
+                file_path = os.path.join(dir_path, filename)
+                
+                # Security check
+                if not os.path.abspath(file_path).startswith(os.path.abspath(base_dir)):
+                    return jsonify({"error": "Invalid file path"}), 400
+                
                 if not os.path.exists(file_path):
                     return jsonify({"error": "File not found"}), 404
+                
+                started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                
+                try:
+                    # For Ansible, use RemoteRunLib's built-in Ansible method
+                    if script_type == "ansible":
+                        client = SSHClient(
+                            machine["host"],
+                            machine["username"],
+                            machine.get("password"),
+                            machine.get("port", 22),
+                            machine.get("key"),
+                        )
+                        # Note: No need to login for Ansible - it handles its own connection
+                        
+                        import time
+                        t0 = time.time()
+                        
+                        if custom_command:
+                            # For custom commands, just run them locally
+                            import subprocess
+                            try:
+                                cd_command = f"cd {dir_path}"
+                                exec_command = f"{cd_command} && {custom_command}"
+                                result = subprocess.run(
+                                    exec_command,
+                                    shell=True,
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=300
+                                )
+                                output = result.stdout
+                                errors = result.stderr if result.returncode != 0 else ""
+                            except Exception as e:
+                                output = ""
+                                errors = str(e)
+                        else:
+                            if filename.endswith(('.yml', '.yaml')):
+                                # Use RemoteRunLib's Ansible method - it runs locally and targets the remote machine
+                                playbook_path = os.path.join(dir_path, filename)
+                                result = client.run_ansible_playbook(playbook_path)
+                                
+                                if isinstance(result, dict):
+                                    output = result.get("output", "")
+                                    errors = result.get("error", "") if not result.get("success", True) else ""
+                                else:
+                                    output = str(result)
+                                    errors = ""
+                            else:
+                                # For non-playbook files, just display content
+                                try:
+                                    with open(os.path.join(dir_path, filename), 'r') as f:
+                                        output = f.read()
+                                    errors = ""
+                                except Exception as e:
+                                    output = ""
+                                    errors = str(e)
+                        
+                        t1 = time.time()
+                        # No need to close client for Ansible as it manages its own connections
                     
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
+                    else:
+                        # For other script types, upload entire directory to remote machine and execute there
+                        client = SSHClient(
+                            machine["host"],
+                            machine["username"],
+                            machine.get("password"),
+                            machine.get("port", 22),
+                            machine.get("key"),
+                        )
+                        client.login()
+                        
+                        import time
+                        t0 = time.time()
+                        
+                        # Always upload the entire directory to maintain context and dependencies
+                        print(f"Uploading directory {dir_path} to remote machine...")
+                        remote_dir_path = client.send_Directory(dir_path)
+                        
+                        if not remote_dir_path:
+                            raise Exception("Failed to upload directory to remote machine")
+                        
+                        print(f"Directory uploaded to: {remote_dir_path}")
+                        
+                        # Detect remote OS to determine appropriate commands
+                        remote_os_info = client.get_remote_os()
+                        remote_os = remote_os_info.get("os", "linux").lower()
+                        print(f"Detected remote OS: {remote_os}")
+                        
+                        # Build execution command based on script type and custom command
+                        if custom_command:
+                            # Use custom command in the remote directory
+                            exec_command = f"cd '{remote_dir_path}' && {custom_command}"
+                            print(f"Using custom command: {exec_command}")
+                        else:
+                            # Use built-in commands for specific script types with OS-aware execution
+                            if script_type == "python":
+                                if filename.endswith('.py'):
+                                    # Determine Python command based on remote OS with fallback logic
+                                    if remote_os == "windows":
+                                        # On Windows, try python first
+                                        python_cmd = "python"
+                                    else:  # Linux, Unix, etc.
+                                        # On Linux, prefer python3 but check availability
+                                        python_cmd = "python3"
+                                        # Check if python3 is available, fallback to python if not
+                                        check_python3, _ = client.run_command("which python3 2>/dev/null || command -v python3", timeout=5, verbose=False)
+                                        if not check_python3.strip():
+                                            # python3 not found, try python
+                                            check_python, _ = client.run_command("which python 2>/dev/null || command -v python", timeout=5, verbose=False)
+                                            if check_python.strip():
+                                                python_cmd = "python"
+                                            else:
+                                                # Neither found, use python3 anyway and let it fail with a proper error
+                                                python_cmd = "python3"
+                                    
+                                    # Python execution in remote directory with full context
+                                    exec_command = f"cd '{remote_dir_path}' && {python_cmd} {filename}"
+                                    print(f"Python execution command: {exec_command}")
+                                else:
+                                    # Generic file execution
+                                    if remote_os == "windows":
+                                        exec_command = f"cd '{remote_dir_path}' && type {filename}"
+                                    else:
+                                        exec_command = f"cd '{remote_dir_path}' && cat {filename}"
+                            elif script_type == "terraform":
+                                if filename.endswith('.tf'):
+                                    # Terraform execution with proper initialization
+                                    exec_command = f"cd '{remote_dir_path}' && terraform init && terraform plan -out=tfplan && terraform apply -auto-approve tfplan"
+                                else:
+                                    # Generic file execution
+                                    if remote_os == "windows":
+                                        exec_command = f"cd '{remote_dir_path}' && type {filename}"
+                                    else:
+                                        exec_command = f"cd '{remote_dir_path}' && cat {filename}"
+                            else:
+                                # Generic execution based on OS
+                                if remote_os == "windows":
+                                    exec_command = f"cd '{remote_dir_path}' && type {filename}"
+                                else:
+                                    exec_command = f"cd '{remote_dir_path}' && cat {filename}"
+                        
+                        # Execute command on remote machine
+                        output, errors = client.run_command(exec_command)
+                        
+                        t1 = time.time()
+                        client.close()
                     
-                return jsonify({
-                    "name": filename,
-                    "content": content
-                })
+                    status = "success" if not errors else "failed"
+                    completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                    duration = t1 - t0
+                    
+                    # Insert execution history
+                    exec_data = {
+                        "id": str(uuid.uuid4()),
+                        "machine_id": machine_id,
+                        "type": f"{script_type}_directory",
+                        "status": status,
+                        "command": f"{dir_name}/{filename}",
+                        "output": str(output),
+                        "started_at": started_at,
+                        "completed_at": completed_at,
+                        "duration": duration,
+                        "logs": f"Executed from directory: {dir_name}",
+                    }
+                    self._insert_execution(exec_data)
+                    
+                    return jsonify({
+                        "success": True,
+                        "output": output,
+                        "directory": dir_name,
+                        "filename": filename,
+                        "execution_time": duration
+                    })
+                    
+                except Exception as e:
+                    completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                    duration = 0
+                    
+                    # Insert failed execution history
+                    exec_data = {
+                        "id": str(uuid.uuid4()),
+                        "machine_id": machine_id,
+                        "type": f"{script_type}_directory",
+                        "status": "failed",
+                        "command": f"{dir_name}/{filename}",
+                        "output": "",
+                        "started_at": started_at,
+                        "completed_at": completed_at,
+                        "duration": duration,
+                        "logs": str(e),
+                    }
+                    self._insert_execution(exec_data)
+                    
+                    return jsonify({"success": False, "error": str(e)}), 500
+                    
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
 
@@ -858,5 +1791,246 @@ class Dashboard:
 
         print(f"Starting Flask server at http://{self.host}:{self.port}")
         socketio.run(app, host=self.host, port=self.port)
+
+    def _execute_ansible_project_local(self, project_dir, main_file, custom_command, extra_args, target_client):
+        """Execute Ansible project locally targeting remote machine."""
+        import time
+        import subprocess
+        
+        start_time = time.time()
+        
+        # Auto-detect main file if not provided
+        if not main_file:
+            main_file = target_client._detect_main_file(project_dir, "ansible")
+            if not main_file:
+                return {
+                    "success": False,
+                    "output": "",
+                    "error": "No suitable Ansible playbook found in project directory",
+                    "main_file": None,
+                    "execution_location": "local"
+                }
+        
+        main_file_path = os.path.join(project_dir, main_file)
+        
+        if not os.path.exists(main_file_path):
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Main file not found: {main_file_path}",
+                "main_file": main_file,
+                "execution_location": "local"
+            }
+        
+        try:
+            if custom_command:
+                # Use custom command in project directory
+                cmd = custom_command
+                if extra_args:
+                    cmd += f" {extra_args}"
+                
+                result = subprocess.run(
+                    cmd,
+                    shell=True,
+                    cwd=project_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=600
+                )
+                
+                end_time = time.time()
+                
+                return {
+                    "success": result.returncode == 0,
+                    "output": result.stdout or "",
+                    "error": result.stderr or "",
+                    "main_file": main_file,
+                    "execution_location": "local",
+                    "execution_time": end_time - start_time,
+                    "command": cmd
+                }
+                
+            elif main_file.endswith(('.yml', '.yaml')):
+                # Use the existing ansible execution method
+                ansible_result = target_client.run_ansible_playbook(
+                    main_file_path,
+                    extra_vars=extra_args,
+                    become=False  # Can be enhanced to accept become parameter
+                )
+                
+                end_time = time.time()
+                
+                if isinstance(ansible_result, dict):
+                    return {
+                        "success": ansible_result.get("success", False),
+                        "output": ansible_result.get("output", ""),
+                        "error": ansible_result.get("error", ""),
+                        "main_file": main_file,
+                        "execution_location": "local",
+                        "execution_time": end_time - start_time,
+                        "command": f"ansible-playbook {main_file_path}"
+                    }
+                else:
+                    return {
+                        "success": True,
+                        "output": str(ansible_result),
+                        "error": "",
+                        "main_file": main_file,
+                        "execution_location": "local",
+                        "execution_time": end_time - start_time,
+                        "command": f"ansible-playbook {main_file_path}"
+                    }
+            else:
+                # Just display file content for non-playbook files
+                with open(main_file_path, 'r') as f:
+                    content = f.read()
+                
+                end_time = time.time()
+                
+                return {
+                    "success": True,
+                    "output": content,
+                    "error": "",
+                    "main_file": main_file,
+                    "execution_location": "local",
+                    "execution_time": end_time - start_time,
+                    "command": f"cat {main_file_path}"
+                }
+                
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "output": "",
+                "error": "Ansible execution timed out after 10 minutes",
+                "main_file": main_file,
+                "execution_location": "local"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Ansible execution failed: {str(e)}",
+                "main_file": main_file,
+                "execution_location": "local"
+            }
+
+    # --- Local Terraform execution helper methods ---
+    def _run_terraform_init_local(self, work_dir):
+        """Run terraform init locally and return (success, output, error)"""
+        import subprocess
+        import shutil
+        
+        # Check if terraform is installed
+        if not shutil.which("terraform"):
+            return False, "", "Terraform is not installed or not in PATH on the dashboard host."
+        
+        try:
+            cmd = ["terraform", "init", "-lock=false"]
+            result = subprocess.run(
+                cmd, 
+                cwd=work_dir, 
+                capture_output=True, 
+                text=True, 
+                timeout=300  # 5 minute timeout
+            )
+            
+            success = result.returncode == 0
+            output = result.stdout or ""
+            error = result.stderr or ""
+            
+            return success, output, error
+            
+        except subprocess.TimeoutExpired:
+            return False, "", "Terraform init timed out after 5 minutes"
+        except Exception as e:
+            return False, "", f"Failed to execute terraform init: {str(e)}"
+
+    def _run_terraform_plan_local(self, work_dir):
+        """Run terraform plan locally and return (success, output, error)"""
+        import subprocess
+        import shutil
+        
+        # Check if terraform is installed
+        if not shutil.which("terraform"):
+            return False, "", "Terraform is not installed or not in PATH on the dashboard host."
+        
+        try:
+            # First run init, then plan
+            init_cmd = ["terraform", "init", "-lock=false"]
+            init_result = subprocess.run(
+                init_cmd, 
+                cwd=work_dir, 
+                capture_output=True, 
+                text=True, 
+                timeout=300
+            )
+            
+            if init_result.returncode != 0:
+                return False, init_result.stdout or "", f"Init failed: {init_result.stderr}"
+            
+            # Now run plan
+            plan_cmd = ["terraform", "plan", "-lock=false"]
+            plan_result = subprocess.run(
+                plan_cmd, 
+                cwd=work_dir, 
+                capture_output=True, 
+                text=True, 
+                timeout=300
+            )
+            
+            success = plan_result.returncode == 0
+            combined_output = f"INIT OUTPUT:\n{init_result.stdout}\n\nPLAN OUTPUT:\n{plan_result.stdout}"
+            error = plan_result.stderr or ""
+            
+            return success, combined_output, error
+            
+        except subprocess.TimeoutExpired:
+            return False, "", "Terraform plan timed out after 5 minutes"
+        except Exception as e:
+            return False, "", f"Failed to execute terraform plan: {str(e)}"
+
+    def _run_terraform_apply_local(self, work_dir):
+        """Run terraform apply locally and return (success, output, error)"""
+        import subprocess
+        import shutil
+        
+        # Check if terraform is installed
+        if not shutil.which("terraform"):
+            return False, "", "Terraform is not installed or not in PATH on the dashboard host."
+        
+        try:
+            # First run init, then apply
+            init_cmd = ["terraform", "init", "-lock=false"]
+            init_result = subprocess.run(
+                init_cmd, 
+                cwd=work_dir, 
+                capture_output=True, 
+                text=True, 
+                timeout=300
+            )
+            
+            if init_result.returncode != 0:
+                return False, init_result.stdout or "", f"Init failed: {init_result.stderr}"
+            
+            # Now run apply with auto-approve
+            apply_cmd = ["terraform", "apply", "-auto-approve", "-lock=false"]
+            apply_result = subprocess.run(
+                apply_cmd, 
+                cwd=work_dir, 
+                capture_output=True, 
+                text=True, 
+                timeout=600  # 10 minute timeout for apply
+            )
+            
+            success = apply_result.returncode == 0
+            combined_output = f"INIT OUTPUT:\n{init_result.stdout}\n\nAPPLY OUTPUT:\n{apply_result.stdout}"
+            error = apply_result.stderr or ""
+            
+            return success, combined_output, error
+            
+        except subprocess.TimeoutExpired:
+            return False, "", "Terraform apply timed out after 10 minutes"
+        except Exception as e:
+            return False, "", f"Failed to execute terraform apply: {str(e)}"
 
 

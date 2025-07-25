@@ -190,19 +190,13 @@ class SSHClient:
                 sftp = self.client.open_sftp()
                 remote_os = self.get_remote_os().get("os")
                 print(f"Detected remote OS: {remote_os}")
-                # Helper to join remote paths correctly
-                def remote_join(*args):
-                    if remote_os and remote_os.lower() == "windows":
-                        return "\\".join(args)
-                    else:
-                        return "/".join(args)
                 if path:
                     if remote_os == "windows":
                         self.run_command(f"mkdir {path}", verbose=False)
-                        remote_script_path = remote_join(path, os.path.basename(file))
+                        remote_script_path = f"{path}\\{os.path.basename(file)}"
                     else:
                         self.run_command(f"mkdir -p {path}", verbose=False)
-                        remote_script_path = remote_join(path, os.path.basename(file))
+                        remote_script_path = f"{path}/{os.path.basename(file)}"
                     sftp.put(file, remote_script_path)
                 else:
                     # Use get_remote_home for user-specific temp directory
@@ -216,7 +210,7 @@ class SSHClient:
                     rand_str = "".join(
                         random.choices(string.ascii_letters + string.digits, k=8)
                     )
-                    temp_dir = remote_join(remote_home, f".tmp_{rand_str}")
+                    temp_dir = os.path.join(remote_home, f".tmp_{rand_str}")
                     if remote_os and remote_os.lower() == "windows":
                         ps_cmd = f"powershell -Command \"New-Item -ItemType Directory -Path '{temp_dir}' -Force | Out-Null; Write-Output '{temp_dir}'\""
                         result = self.run_command(ps_cmd, verbose=False)
@@ -225,11 +219,11 @@ class SSHClient:
                             temp_path = out.strip().splitlines()[0] if out else temp_dir
                         else:
                             temp_path = temp_dir
-                        remote_script_path = remote_join(temp_path, os.path.basename(file))
+                        remote_script_path = f"{temp_path}\\{os.path.basename(file)}"
                     elif remote_os and remote_os.lower() == "linux":
                         self.run_command(f"mkdir -p '{temp_dir}'", verbose=False)
                         temp_path = temp_dir
-                        remote_script_path = remote_join(temp_path, os.path.basename(file))
+                        remote_script_path = f"{temp_path}/{os.path.basename(file)}"
                         print(f"Remote script path: {remote_script_path}")
                     else:
                         print("Unknown remote OS. Cannot determine temp path.")
@@ -264,12 +258,6 @@ class SSHClient:
         try:
             sftp = self.client.open_sftp()
             remote_os = self.get_remote_os().get("os")
-            # Helper to join remote paths correctly
-            def remote_join(*args):
-                if remote_os and remote_os.lower() == "windows":
-                    return "\\".join(args)
-                else:
-                    return "/".join(args)
             if remote_path is None:
                 # Create temp dir in remote user's home directory
                 remote_home = self.get_remote_home()
@@ -284,7 +272,7 @@ class SSHClient:
                     random.choices(string.ascii_letters + string.digits, k=8)
                 )
                 base_name = os.path.basename(local_dir.rstrip(os.sep))
-                remote_temp_dir = remote_join(
+                remote_temp_dir = os.path.join(
                     remote_home, f".tmp_{base_name}_{rand_str}"
                 )
                 # Create the directory on remote
@@ -313,7 +301,7 @@ class SSHClient:
                     pass  # Directory may already exist
                 for item in os.listdir(local_path):
                     lpath = os.path.join(local_path, item)
-                    rpath = remote_join(remote_path, item)
+                    rpath = os.path.join(remote_path, item)
                     if os.path.isdir(lpath):
                         _recursive_upload(lpath, rpath)
                     else:
@@ -421,6 +409,7 @@ class SSHClient:
         display=True,
         ansible_remote_tmp=None,
         module="command",
+        become=False,
     ):
         """
         Runs an Ansible playbook or an ad-hoc command targeting the remote host.
@@ -432,6 +421,7 @@ class SSHClient:
             extra_vars (str, optional): Extra variables for Ansible.
             inventory_file (str, optional): Path to inventory file. If None, a temporary inventory is created.
             module (str, optional): Ansible module to use for ad-hoc commands. Defaults to "command".
+            become (bool, optional): Whether to run with privilege escalation (sudo). Defaults to False.
         """
         is_local = platform.system().lower() == "linux"
         if not is_local:
@@ -542,6 +532,10 @@ class SSHClient:
                 command_to_print = command.copy()
             if self.key_file:
                 command_to_print.extend(["--private-key", self.key_file])
+            
+            # Add --become flag if requested
+            if become:
+                command_to_print.append("--become")
 
             # Build the real command (with real password) for execution
             real_extra_vars_list = []
@@ -556,6 +550,10 @@ class SSHClient:
                 real_command.extend(["--extra-vars", " ".join(real_extra_vars_list)])
             if self.key_file:
                 real_command.extend(["--private-key", self.key_file])
+            
+            # Add --become flag to real command if requested
+            if become:
+                real_command.append("--become")
             # Do NOT add --remote-tmp again here
 
             print(f"Running Ansible: {' '.join(command_to_print)}")
@@ -1051,6 +1049,530 @@ class SSHClient:
             print("Connection closed.")
         else:
             print("Connection was not established.")
+
+    # Enhanced Terraform methods that return both success status and output
+    def run_terraform_init_with_output(self, work_dir, backend_config=None, env_vars=None, remote=False):
+        """
+        Initialize Terraform in the given directory with output capture.
+        Returns: (success: bool, output: str, error: str)
+        """
+        import os
+        import shlex
+        import shutil
+        import subprocess
+
+        tf_cmd = ["terraform", "init", "-lock=false"]
+        if backend_config:
+            for k, v in backend_config.items():
+                tf_cmd.extend(["-backend-config", f"{k}={v}"])
+        
+        env = os.environ.copy()
+        if env_vars:
+            env.update(env_vars)
+        
+        cmd_str = " ".join(shlex.quote(x) for x in tf_cmd)
+        
+        if remote:
+            # Send working dir to remote, run init
+            remote_dir = self.send_Directory(work_dir) if (work_dir and os.path.isdir(work_dir)) else None
+            if work_dir and not remote_dir:
+                return False, "", "Failed to send working directory to remote host."
+            
+            if remote_dir:
+                remote_cmd = f"cd {remote_dir} && {cmd_str}"
+            else:
+                remote_cmd = cmd_str
+                
+            result = self.run_command(remote_cmd)
+            if result is None:
+                return False, "", "Failed to execute remote command."
+            
+            out, err = result if isinstance(result, tuple) else (str(result), "")
+            success = not bool(err)
+            return success, out or "", err or ""
+        else:
+            # Check if terraform is installed locally
+            if not shutil.which("terraform"):
+                return False, "", "Terraform is not installed or not in PATH."
+            
+            proc = subprocess.run(
+                tf_cmd, cwd=work_dir, env=env, capture_output=True, text=True
+            )
+            success = proc.returncode == 0
+            return success, proc.stdout or "", proc.stderr or ""
+
+    def run_terraform_plan_with_output(self, work_dir, var_file=None, vars_dict=None, env_vars=None, out_plan=None, remote=False):
+        """
+        Run 'terraform plan' in the given directory with output capture.
+        Returns: (success: bool, output: str, error: str)
+        """
+        import os
+        import shlex
+        import shutil
+        import subprocess
+
+        tf_cmd = ["terraform", "plan", "-lock=false"]
+        if var_file:
+            tf_cmd.extend(["-var-file", var_file])
+        if vars_dict:
+            for k, v in vars_dict.items():
+                tf_cmd.extend(["-var", f"{k}={v}"])
+        if out_plan:
+            tf_cmd.extend(["-out", out_plan])
+        
+        env = os.environ.copy()
+        if env_vars:
+            env.update(env_vars)
+        
+        cmd_str = " ".join(shlex.quote(x) for x in tf_cmd)
+        
+        if remote:
+            # Send working dir to remote
+            remote_dir = self.send_Directory(work_dir) if (work_dir and os.path.isdir(work_dir)) else None
+            if work_dir and not remote_dir:
+                return False, "", "Failed to send working directory to remote host."
+            
+            # Always run init first for remote execution
+            init_cmd = "terraform init -lock=false"
+            if remote_dir:
+                remote_init_cmd = f"cd {remote_dir} && {init_cmd}"
+            else:
+                remote_init_cmd = init_cmd
+                
+            init_result = self.run_command(remote_init_cmd)
+            if init_result is None:
+                return False, "", "Remote terraform init failed."
+            
+            init_out, init_err = init_result if isinstance(init_result, tuple) else (str(init_result), "")
+            if init_err:
+                return False, init_out or "", f"Init failed: {init_err}"
+            
+            # Now run plan
+            if remote_dir:
+                remote_cmd = f"cd {remote_dir} && {cmd_str}"
+            else:
+                remote_cmd = cmd_str
+                
+            result = self.run_command(remote_cmd)
+            if result is None:
+                return False, init_out or "", "Failed to execute remote plan command."
+            
+            out, err = result if isinstance(result, tuple) else (str(result), "")
+            combined_output = f"INIT OUTPUT:\n{init_out}\n\nPLAN OUTPUT:\n{out or ''}"
+            success = not bool(err)
+            return success, combined_output, err or ""
+        else:
+            # Check if terraform is installed locally
+            if not shutil.which("terraform"):
+                return False, "", "Terraform is not installed or not in PATH."
+            
+            proc = subprocess.run(
+                tf_cmd, cwd=work_dir, env=env, capture_output=True, text=True
+            )
+            success = proc.returncode == 0
+            return success, proc.stdout or "", proc.stderr or ""
+
+    def run_terraform_apply_with_output(self, work_dir, plan_file=None, auto_approve=True, env_vars=None, remote=False):
+        """
+        Run 'terraform apply' in the given directory with output capture.
+        Returns: (success: bool, output: str, error: str)
+        """
+        import os
+        import shlex
+        import shutil
+        import subprocess
+
+        tf_cmd = ["terraform", "apply", "-lock=false"]
+        if auto_approve:
+            tf_cmd.append("-auto-approve")
+        if plan_file:
+            tf_cmd.append(plan_file)
+        
+        env = os.environ.copy()
+        if env_vars:
+            env.update(env_vars)
+        
+        cmd_str = " ".join(shlex.quote(x) for x in tf_cmd)
+        
+        if remote:
+            # Send working dir to remote
+            remote_dir = self.send_Directory(work_dir) if (work_dir and os.path.isdir(work_dir)) else None
+            if work_dir and not remote_dir:
+                return False, "", "Failed to send working directory to remote host."
+            
+            # Always run init first for remote execution
+            init_cmd = "terraform init -lock=false"
+            if remote_dir:
+                remote_init_cmd = f"cd {remote_dir} && {init_cmd}"
+            else:
+                remote_init_cmd = init_cmd
+                
+            init_result = self.run_command(remote_init_cmd)
+            if init_result is None:
+                return False, "", "Remote terraform init failed."
+            
+            init_out, init_err = init_result if isinstance(init_result, tuple) else (str(init_result), "")
+            if init_err:
+                return False, init_out or "", f"Init failed: {init_err}"
+            
+            # Now run apply
+            if remote_dir:
+                remote_cmd = f"cd {remote_dir} && {cmd_str}"
+            else:
+                remote_cmd = cmd_str
+                
+            result = self.run_command(remote_cmd)
+            if result is None:
+                return False, init_out or "", "Failed to execute remote apply command."
+            
+            out, err = result if isinstance(result, tuple) else (str(result), "")
+            combined_output = f"INIT OUTPUT:\n{init_out}\n\nAPPLY OUTPUT:\n{out or ''}"
+            success = not bool(err)
+            return success, combined_output, err or ""
+        else:
+            # Check if terraform is installed locally
+            if not shutil.which("terraform"):
+                return False, "", "Terraform is not installed or not in PATH."
+            
+            proc = subprocess.run(
+                tf_cmd, cwd=work_dir, env=env, capture_output=True, text=True
+            )
+            success = proc.returncode == 0
+            return success, proc.stdout or "", proc.stderr or ""
+
+    def run_project_directory(
+        self,
+        project_dir,
+        main_file=None,
+        project_type="python",
+        custom_command=None,
+        remote=True,
+        extra_args=None,
+    ):
+        """
+        Execute a project directory by copying it and running the main file.
+        
+        Args:
+            project_dir (str): Path to the project directory
+            main_file (str, optional): Main file to execute. If None, will try to detect automatically.
+            project_type (str): Type of project ('python', 'ansible', 'terraform')
+            custom_command (str, optional): Custom command to execute instead of default
+            remote (bool): Whether to run on remote host (True) or locally (False)
+            extra_args (str, optional): Additional arguments to pass to the execution command
+        
+        Returns:
+            dict: Execution result with success, output, error, and execution details
+        """
+        import os
+        import shutil
+        import subprocess
+        import tempfile
+        
+        if not os.path.isdir(project_dir):
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Project directory not found: {project_dir}",
+                "main_file": main_file,
+                "execution_location": "none"
+            }
+        
+        # Auto-detect main file if not provided
+        if not main_file:
+            main_file = self._detect_main_file(project_dir, project_type)
+            if not main_file:
+                return {
+                    "success": False,
+                    "output": "",
+                    "error": f"No main file found for {project_type} project in {project_dir}",
+                    "main_file": None,
+                    "execution_location": "none"
+                }
+        
+        # Validate main file exists
+        main_file_path = os.path.join(project_dir, main_file)
+        if not os.path.exists(main_file_path):
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Main file not found: {main_file_path}",
+                "main_file": main_file,
+                "execution_location": "none"
+            }
+        
+        execution_location = "remote" if remote else "local"
+        
+        try:
+            if remote and self.client:
+                # Remote execution: upload directory and execute
+                return self._execute_project_remote(project_dir, main_file, project_type, custom_command, extra_args)
+            else:
+                # Local execution: execute in local directory
+                return self._execute_project_local(project_dir, main_file, project_type, custom_command, extra_args)
+                
+        except Exception as e:
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Project execution failed: {str(e)}",
+                "main_file": main_file,
+                "execution_location": execution_location
+            }
+    
+    def _detect_main_file(self, project_dir, project_type):
+        """Detect the main file for a project based on type and common patterns."""
+        import os
+        
+        if project_type == "python":
+            # Look for common Python main files
+            candidates = [
+                "main.py", "app.py", "run.py", "__main__.py", 
+                "start.py", "server.py", "manage.py"
+            ]
+            for candidate in candidates:
+                if os.path.exists(os.path.join(project_dir, candidate)):
+                    return candidate
+            
+            # Look for any Python file if no main file found
+            for file in os.listdir(project_dir):
+                if file.endswith('.py') and not file.startswith('_'):
+                    return file
+                    
+        elif project_type == "ansible":
+            # Look for common Ansible files
+            candidates = [
+                "playbook.yml", "playbook.yaml", "main.yml", "main.yaml",
+                "site.yml", "site.yaml", "deploy.yml", "deploy.yaml"
+            ]
+            for candidate in candidates:
+                if os.path.exists(os.path.join(project_dir, candidate)):
+                    return candidate
+                    
+            # Look for any YAML file
+            for file in os.listdir(project_dir):
+                if file.endswith(('.yml', '.yaml')):
+                    return file
+                    
+        elif project_type == "terraform":
+            # Look for common Terraform files
+            candidates = [
+                "main.tf", "terraform.tf", "infrastructure.tf", "resources.tf"
+            ]
+            for candidate in candidates:
+                if os.path.exists(os.path.join(project_dir, candidate)):
+                    return candidate
+                    
+            # Look for any .tf file
+            for file in os.listdir(project_dir):
+                if file.endswith('.tf'):
+                    return file
+        
+        return None
+    
+    def _execute_project_remote(self, project_dir, main_file, project_type, custom_command, extra_args):
+        """Execute project on remote host."""
+        import time
+        
+        if not self.client:
+            return {
+                "success": False,
+                "output": "",
+                "error": "Not connected to remote host. Call login() first.",
+                "main_file": main_file,
+                "execution_location": "remote"
+            }
+        
+        start_time = time.time()
+        
+        # Upload entire project directory
+        print(f"Uploading project directory {project_dir} to remote host...")
+        remote_dir = self.send_Directory(project_dir)
+        
+        if not remote_dir:
+            return {
+                "success": False,
+                "output": "",
+                "error": "Failed to upload project directory to remote host",
+                "main_file": main_file,
+                "execution_location": "remote"
+            }
+        
+        print(f"Project uploaded to: {remote_dir}")
+        
+        # Detect remote OS for command construction
+        remote_os_info = self.get_remote_os()
+        remote_os = remote_os_info.get("os", "linux").lower()
+        
+        # Build execution command
+        if custom_command:
+            # Use custom command
+            exec_cmd = f"cd '{remote_dir}' && {custom_command}"
+            if extra_args:
+                exec_cmd += f" {extra_args}"
+        else:
+            # Build default command based on project type
+            exec_cmd = self._build_execution_command(remote_dir, main_file, project_type, remote_os, extra_args)
+        
+        print(f"Executing command: {exec_cmd}")
+        
+        # Execute the command
+        output, errors = self.run_command(exec_cmd)
+        end_time = time.time()
+        
+        return {
+            "success": not bool(errors),
+            "output": output or "",
+            "error": errors or "",
+            "main_file": main_file,
+            "execution_location": "remote",
+            "execution_time": end_time - start_time,
+            "remote_directory": remote_dir,
+            "command": exec_cmd
+        }
+    
+    def _execute_project_local(self, project_dir, main_file, project_type, custom_command, extra_args):
+        """Execute project locally."""
+        import subprocess
+        import time
+        import os
+        
+        start_time = time.time()
+        
+        # Build execution command for local execution
+        if custom_command:
+            # Use custom command
+            exec_cmd = custom_command
+            if extra_args:
+                exec_cmd += f" {extra_args}"
+        else:
+            # Build default command based on project type
+            exec_cmd = self._build_execution_command(project_dir, main_file, project_type, "linux", extra_args)
+        
+        print(f"Executing locally: {exec_cmd}")
+        
+        try:
+            # Execute locally
+            result = subprocess.run(
+                exec_cmd,
+                shell=True,
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minute timeout
+            )
+            
+            end_time = time.time()
+            
+            return {
+                "success": result.returncode == 0,
+                "output": result.stdout or "",
+                "error": result.stderr or "",
+                "main_file": main_file,
+                "execution_location": "local",
+                "execution_time": end_time - start_time,
+                "command": exec_cmd,
+                "return_code": result.returncode
+            }
+            
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "output": "",
+                "error": "Command execution timed out after 10 minutes",
+                "main_file": main_file,
+                "execution_location": "local",
+                "command": exec_cmd
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Local execution failed: {str(e)}",
+                "main_file": main_file,
+                "execution_location": "local",
+                "command": exec_cmd
+            }
+    
+    def _build_execution_command(self, work_dir, main_file, project_type, os_type, extra_args):
+        """Build execution command based on project type and OS."""
+        
+        if project_type == "python":
+            # Python execution
+            if os_type == "windows":
+                python_cmd = "python"
+            else:
+                python_cmd = "python3"
+            
+            cmd = f"{python_cmd} {main_file}"
+            if extra_args:
+                cmd += f" {extra_args}"
+            
+            # For remote execution, include cd command
+            if not work_dir.endswith(main_file):
+                cmd = f"cd '{work_dir}' && {cmd}"
+                
+        elif project_type == "ansible":
+            # Ansible execution (always runs locally, targeting remote)
+            # Note: For ansible, work_dir should be the playbook path for local execution
+            # or the remote directory path for remote setup
+            if main_file.endswith(('.yml', '.yaml')):
+                if work_dir.endswith(main_file):
+                    # work_dir is the full path to playbook
+                    cmd = f"ansible-playbook {work_dir}"
+                else:
+                    # work_dir is directory, main_file is relative
+                    cmd = f"ansible-playbook {work_dir}/{main_file}"
+                    
+                if extra_args:
+                    cmd += f" {extra_args}"
+            else:
+                # Not a playbook, just display content
+                if os_type == "windows":
+                    cmd = f"type {main_file}"
+                else:
+                    cmd = f"cat {main_file}"
+                
+                if not work_dir.endswith(main_file):
+                    cmd = f"cd '{work_dir}' && {cmd}"
+                    
+        elif project_type == "terraform":
+            # Terraform execution with proper workflow
+            if main_file.endswith('.tf'):
+                # Full Terraform workflow: init -> plan -> apply
+                base_cmd = "terraform init"
+                if extra_args and "init-only" in extra_args:
+                    cmd = base_cmd
+                elif extra_args and "plan-only" in extra_args:
+                    cmd = f"{base_cmd} && terraform plan"
+                else:
+                    cmd = f"{base_cmd} && terraform plan -out=tfplan && terraform apply -auto-approve tfplan"
+                    
+                if extra_args and not any(x in extra_args for x in ["init-only", "plan-only"]):
+                    # Add extra args to apply command
+                    clean_args = extra_args.replace("init-only", "").replace("plan-only", "").strip()
+                    if clean_args:
+                        cmd = cmd.replace("terraform apply", f"terraform apply {clean_args}")
+            else:
+                # Not a Terraform file, just display content
+                if os_type == "windows":
+                    cmd = f"type {main_file}"
+                else:
+                    cmd = f"cat {main_file}"
+                    
+            # For remote execution, include cd command
+            if not work_dir.endswith(main_file):
+                cmd = f"cd '{work_dir}' && {cmd}"
+        else:
+            # Generic execution - just display the file
+            if os_type == "windows":
+                cmd = f"type {main_file}"
+            else:
+                cmd = f"cat {main_file}"
+                
+            if not work_dir.endswith(main_file):
+                cmd = f"cd '{work_dir}' && {cmd}"
+        
+        return cmd
 
     def __del__(self):
         """Ensure the SSH connection is closed when the object is deleted."""

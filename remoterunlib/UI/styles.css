@@ -374,7 +374,7 @@ body {
 
 /* Execution Details Modal */
 .execution-modal .modal-content {
-    max-width: 900px;
+    max-width: 70vw;
     max-height: 90vh;
 }
 
@@ -399,7 +399,21 @@ body {
     font-size: 16px;
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 10px;
+}
+
+.detail-section h4 .download-btn {
+    margin-left: auto;
+    padding: 4px 8px;
+    font-size: 12px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.detail-section h4 .download-btn:hover {
+    background: #6c757d;
+    transform: translateY(-1px);
 }
 
 .detail-grid {
@@ -659,6 +673,17 @@ body {
     display: block;
 }
 
+.tab-actions {
+    margin-top: 20px;
+    padding: 15px;
+    border-top: 1px solid #e9ecef;
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    background: #f8f9fa;
+    border-radius: 0 0 8px 8px;
+}
+
 .drop-zone {
     border: 2px dashed #ccc;
     border-radius: 10px;
@@ -857,34 +882,67 @@ body {
     background: #f0f4ff;
 }
 
-.delete-file-btn {
-    background: none;
-    border: none;
-    color: #dc3545;
+.file-info {
+    flex: 1;
     cursor: pointer;
     padding: 4px;
-    border-radius: 3px;
-    opacity: 0;
-    transition: opacity 0.3s ease;
+    border-radius: 4px;
+    transition: all 0.3s ease;
 }
 
-.file-item:hover .delete-file-btn {
-    opacity: 1;
-}
-
-.delete-file-btn:hover {
-    background: #f8d7da;
-}
-
-.file-info {
-    display: flex;
-    align-items: center;
-    gap: 10px;
+.file-info:hover {
+    background: rgba(102, 126, 234, 0.1);
+    color: #667eea;
 }
 
 .file-actions {
     display: flex;
     gap: 5px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.file-item:hover .file-actions {
+    opacity: 1;
+}
+
+.edit-file-btn,
+.rename-file-btn,
+.delete-file-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 4px;
+    transition: all 0.3s ease;
+    font-size: 12px;
+}
+
+.edit-file-btn {
+    color: #28a745;
+}
+
+.edit-file-btn:hover {
+    background: #d4edda;
+    color: #155724;
+}
+
+.rename-file-btn {
+    color: #ffc107;
+}
+
+.rename-file-btn:hover {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.delete-file-btn {
+    color: #dc3545;
+}
+
+.delete-file-btn:hover {
+    background: #f8d7da;
+    color: #721c24;
 }
 
 /* Ansible Specific */
@@ -918,12 +976,658 @@ body {
     display: block;
 }
 
+/* Terraform Workflow Guide */
+.terraform-workflow-guide {
+    margin: 15px 0;
+    padding: 12px 15px;
+    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+    border-radius: 8px;
+    border-left: 4px solid #2196f3;
+}
+
+.workflow-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.9rem;
+    color: #1976d2;
+}
+
+.workflow-info i {
+    color: #2196f3;
+    font-size: 1rem;
+}
+
+.workflow-info strong {
+    font-weight: 600;
+    padding: 2px 6px;
+    background: rgba(33, 150, 243, 0.1);
+    border-radius: 4px;
+    margin: 0 2px;
+}
+
 /* Terraform Actions */
 .terraform-actions {
     display: flex;
     gap: 10px;
     margin-top: 20px;
     flex-wrap: wrap;
+}
+
+.terraform-actions .btn {
+    position: relative;
+}
+
+#terraform-init-btn {
+    background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+    color: white;
+}
+
+#terraform-init-btn:hover {
+    background: linear-gradient(135deg, #495057 0%, #343a40 100%);
+}
+
+#terraform-plan-btn {
+    background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+    color: white;
+}
+
+#terraform-plan-btn:hover {
+    background: linear-gradient(135deg, #138496 0%, #0f6674 100%);
+}
+
+#terraform-apply-btn {
+    background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
+    color: white;
+}
+
+#terraform-apply-btn:hover {
+    background: linear-gradient(135deg, #1e7e34 0%, #155724 100%);
+}
+
+/* Terraform Directory Actions */
+.directory-terraform-actions {
+    margin-top: 20px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border-left: 4px solid #17a2b8;
+}
+
+.directory-terraform-actions h6 {
+    margin-bottom: 15px;
+    color: #495057;
+    font-weight: 600;
+}
+
+.terraform-dir-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.terraform-dir-buttons .btn {
+    min-width: 100px;
+}
+
+#terraform-dir-init-btn {
+    background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+    color: white;
+}
+
+#terraform-dir-init-btn:hover {
+    background: linear-gradient(135deg, #495057 0%, #343a40 100%);
+}
+
+#terraform-dir-plan-btn {
+    background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+    color: white;
+}
+
+#terraform-dir-plan-btn:hover {
+    background: linear-gradient(135deg, #138496 0%, #0f6674 100%);
+}
+
+#terraform-dir-apply-btn {
+    background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
+    color: white;
+}
+
+#terraform-dir-apply-btn:hover {
+    background: linear-gradient(135deg, #1e7e34 0%, #155724 100%);
+}
+
+/* Enhanced File Execution Controls */
+.directory-execution {
+    margin-top: 20px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border-left: 4px solid #007bff;
+}
+
+.directory-execution h6 {
+    margin-bottom: 15px;
+    color: #495057;
+    font-weight: 600;
+}
+
+.execution-summary {
+    margin-bottom: 15px;
+    padding: 10px;
+    background: #e9ecef;
+    border-radius: 5px;
+}
+
+.selection-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.selection-info span {
+    font-weight: 500;
+    color: #495057;
+}
+
+.execution-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.execution-mode {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.execution-mode .form-label {
+    font-weight: 500;
+    margin: 0;
+    color: #495057;
+}
+
+.mode-options {
+    display: flex;
+    gap: 15px;
+}
+
+.radio-option {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    font-weight: 400;
+}
+
+.radio-option input[type="radio"] {
+    margin: 0;
+}
+
+.single-file-controls,
+.execution-options {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.execution-options .form-control {
+    min-width: 200px;
+}
+
+.execution-status {
+    margin-top: 10px;
+    padding: 10px;
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 5px;
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #856404;
+}
+
+/* Enhanced File Items with Checkboxes */
+.directory-file-item {
+    display: flex;
+    align-items: center;
+    padding: 15px;
+    border: 1px solid #e1e8ed;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    background: #fff;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.directory-file-item:hover {
+    background: #f8f9fa;
+    border-color: #007bff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.directory-file-item.selected {
+    background: #e3f2fd;
+    border-color: #2196f3;
+    box-shadow: 0 2px 8px rgba(33, 150, 243, 0.2);
+}
+
+.file-checkbox {
+    margin-right: 15px;
+    transform: scale(1.2);
+}
+
+.file-info-left {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    gap: 15px;
+}
+
+.file-selection-indicator {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #28a745;
+    color: white;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+}
+
+.directory-file-item.selected .file-selection-indicator {
+    display: flex;
+}
+
+/* File Status Indicators */
+.file-status {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    margin-top: 5px;
+}
+
+.file-status.executable {
+    color: #28a745;
+}
+
+.file-status.readonly {
+    color: #dc3545;
+}
+
+.file-status.modified {
+    color: #ffc107;
+}
+
+/* Batch Operation Controls */
+.batch-controls {
+    display: none;
+    padding: 15px;
+    background: #e7f3ff;
+    border: 1px solid #b3d9ff;
+    border-radius: 5px;
+    margin-top: 10px;
+}
+
+.batch-controls.active {
+    display: block;
+}
+
+.batch-summary {
+    margin-bottom: 10px;
+    font-weight: 500;
+    color: #0056b3;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .execution-controls {
+        flex-direction: column;
+    }
+
+    .mode-options {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .single-file-controls,
+    .execution-options {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .execution-options .form-control {
+        min-width: 100%;
+    }
+}
+
+/* Directory Management */
+.directory-management {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.directory-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #e1e8ed;
+}
+
+.directory-header h4 {
+    margin: 0;
+    color: #2c3e50;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.directory-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.directories-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.directory-card {
+    background: white;
+    border: 1px solid #e1e8ed;
+    border-radius: 8px;
+    padding: 15px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.directory-card:hover {
+    border-color: #667eea;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+    transform: translateY(-2px);
+}
+
+.directory-card.selected {
+    border-color: #667eea;
+    background: #f0f4ff;
+}
+
+.directory-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.directory-name {
+    font-weight: 600;
+    color: #2c3e50;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.directory-name i {
+    color: #667eea;
+}
+
+.directory-delete {
+    background: none;
+    border: none;
+    color: #dc3545;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.directory-card:hover .directory-delete {
+    opacity: 1;
+}
+
+.directory-delete:hover {
+    background: #f8d7da;
+}
+
+.directory-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 8px;
+}
+
+.directory-meta {
+    font-size: 11px;
+    color: #999;
+}
+
+.directory-details {
+    background: white;
+    border: 1px solid #e1e8ed;
+    border-radius: 8px;
+    padding: 20px;
+    margin-top: 20px;
+}
+
+.directory-details-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #e1e8ed;
+}
+
+.directory-details-header h5 {
+    margin: 0;
+    color: #2c3e50;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.directory-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.directory-files {
+    margin-bottom: 20px;
+}
+
+.directory-file-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    border: 1px solid #e1e8ed;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    background: #fafbfc;
+    transition: all 0.3s ease;
+}
+
+.directory-file-item:hover {
+    background: #f0f4ff;
+    border-color: #667eea;
+}
+
+.directory-file-item.selected {
+    background: #e8f4f8;
+    border-color: #17a2b8;
+}
+
+.file-info-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.file-icon {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    font-size: 12px;
+    color: white;
+    font-weight: bold;
+}
+
+.file-icon.yml,
+.file-icon.yaml {
+    background: #ff6b6b;
+}
+
+.file-icon.tf {
+    background: #7b68ee;
+}
+
+.file-icon.py {
+    background: #3776ab;
+}
+
+.file-icon.default {
+    background: #6c757d;
+}
+
+.file-name {
+    font-weight: 500;
+    color: #2c3e50;
+}
+
+.file-meta {
+    font-size: 11px;
+    color: #666;
+}
+
+.file-actions {
+    display: flex;
+    gap: 5px;
+    opacity: 0.8;
+    transition: opacity 0.3s ease;
+}
+
+.directory-file-item:hover .file-actions {
+    opacity: 1;
+}
+
+.file-action-btn {
+    background: none;
+    border: none;
+    color: #666;
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    font-size: 14px;
+    min-width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.file-action-btn:hover {
+    background: #f8f9fa;
+    color: #333;
+}
+
+.file-action-btn.edit {
+    color: #28a745;
+}
+
+.file-action-btn.edit:hover {
+    background: #d4edda;
+    color: #155724;
+}
+
+.file-action-btn.rename {
+    color: #ffc107;
+}
+
+.file-action-btn.rename:hover {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.file-action-btn.delete {
+    color: #dc3545;
+}
+
+.file-action-btn.delete:hover {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.directory-execution {
+    background: #f8f9fa;
+    border-radius: 6px;
+    padding: 15px;
+    border-left: 4px solid #667eea;
+}
+
+.directory-execution h6 {
+    margin: 0 0 15px 0;
+    color: #2c3e50;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.execution-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.execution-controls .form-control {
+    margin: 0;
+}
+
+.empty-directory {
+    text-align: center;
+    padding: 40px 20px;
+    color: #666;
+    background: white;
+    border: 1px dashed #ccc;
+    border-radius: 8px;
+}
+
+.empty-directory i {
+    font-size: 3rem;
+    margin-bottom: 15px;
+    color: #ccc;
+}
+
+.empty-directory p {
+    margin: 0;
+    font-size: 16px;
 }
 
 /* Enhanced Logs Panel */
@@ -1061,7 +1765,7 @@ body {
     background: white;
     border-radius: 10px;
     width: 90%;
-    max-width: 500px;
+    max-width: 60vw;
     max-height: 90vh;
     overflow-y: auto;
     animation: slideIn 0.3s ease;
@@ -1103,7 +1807,7 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(0, 0, 0, 0.250);
     z-index: 3000;
     align-items: center;
     justify-content: center;
@@ -1338,5 +2042,510 @@ body {
 
     .line-numbers {
         font-size: 12px;
+    }
+}
+
+/* ======================================================================
+   PROJECT EXECUTION STYLES - Enhanced directory project execution
+   ====================================================================== */
+
+/* Project execution container */
+.project-execution-mode {
+    background: linear-gradient(145deg, #f8f9fa, #e9ecef);
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 15px 0;
+}
+
+/* Execution location selection */
+.execution-location {
+    margin-bottom: 20px;
+}
+
+.execution-location .mode-options {
+    display: flex;
+    gap: 15px;
+    margin-top: 8px;
+}
+
+.execution-location .radio-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 15px;
+    background: #fff;
+    border: 2px solid #dee2e6;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.execution-location .radio-option:hover {
+    border-color: #007bff;
+    background: #f8f9ff;
+}
+
+.execution-location .radio-option input[type="radio"]:checked+span {
+    color: #007bff;
+    font-weight: 600;
+}
+
+.execution-location .radio-option input[type="radio"]:checked {
+    background: #007bff;
+}
+
+/* Main file selection */
+.main-file-selection {
+    margin-bottom: 20px;
+}
+
+.main-file-controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+    align-items: center;
+}
+
+/* Command options */
+.command-options {
+    margin-bottom: 15px;
+}
+
+.command-controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+/* Execution information */
+.execution-info {
+    margin-bottom: 15px;
+}
+
+.execution-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 15px;
+    background: #e7f3ff;
+    border: 1px solid #b3d9ff;
+    border-radius: 6px;
+    color: #0066cc;
+    font-size: 14px;
+}
+
+.execution-note i {
+    color: #0066cc;
+}
+
+/* Terraform workflow options */
+.terraform-workflow {
+    margin-bottom: 15px;
+}
+
+.workflow-options {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+/* Ansible privilege control in project mode */
+.ansible-privilege-control {
+    margin: 15px 0;
+}
+
+.privilege-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 15px;
+    background: linear-gradient(135deg, #fff5f5, #ffe6e6);
+    border: 2px solid #ffcccc;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    user-select: none;
+}
+
+.privilege-option:hover {
+    background: linear-gradient(135deg, #fff0f0, #ffdddd);
+    border-color: #ff9999;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(255, 0, 0, 0.1);
+}
+
+.privilege-option input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #dc3545;
+}
+
+.privilege-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #dc3545;
+    font-weight: 600;
+}
+
+.privilege-label i {
+    font-size: 16px;
+    color: #dc3545;
+}
+
+.privilege-text {
+    font-size: 14px;
+}
+
+.privilege-option input[type="checkbox"]:checked+.privilege-label {
+    color: #b02a37;
+}
+
+.privilege-option input[type="checkbox"]:checked+.privilege-label i {
+    color: #b02a37;
+}
+
+/* Enhanced execution buttons */
+#python-execute-project-btn,
+#ansible-execute-project-btn,
+#terraform-execute-project-btn {
+    background: linear-gradient(145deg, #28a745, #20c997);
+    border: none;
+    color: white;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 8px rgba(40, 167, 69, 0.3);
+}
+
+#python-execute-project-btn:hover,
+#ansible-execute-project-btn:hover,
+#terraform-execute-project-btn:hover {
+    background: linear-gradient(145deg, #218838, #1ea080);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(40, 167, 69, 0.4);
+}
+
+/* Detection buttons */
+#python-detect-main-btn,
+#ansible-detect-main-btn,
+#terraform-detect-main-btn {
+    background: linear-gradient(145deg, #17a2b8, #20c997);
+    border: none;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    transition: all 0.3s ease;
+}
+
+#python-detect-main-btn:hover,
+#ansible-detect-main-btn:hover,
+#terraform-detect-main-btn:hover {
+    background: linear-gradient(145deg, #138496, #1ea080);
+    transform: translateY(-1px);
+}
+
+/* Form controls in project execution */
+.project-execution-mode .form-control {
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    padding: 8px 12px;
+    transition: all 0.3s ease;
+}
+
+.project-execution-mode .form-control:focus {
+    border-color: #007bff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+/* Responsive design for project execution */
+@media (max-width: 768px) {
+
+    .command-controls,
+    .workflow-options,
+    .main-file-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .execution-location .mode-options {
+        flex-direction: column;
+    }
+
+    .project-execution-mode .form-control {
+        width: 100% !important;
+        margin-bottom: 10px;
+    }
+}
+
+/* ======================================================================
+   ENTERPRISE PRIVILEGE ESCALATION CONTROLS
+   Professional styling for "Become (as root)" functionality
+   ====================================================================== */
+
+/* Privilege escalation container */
+.privilege-control {
+    margin: 15px 0;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #fff8e1 0%, #fff3d4 100%);
+    border: 1px solid #ffb74d;
+    border-radius: 8px;
+    position: relative;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.privilege-control:hover {
+    background: linear-gradient(135deg, #fff5d6 0%, #ffecb3 100%);
+    border-color: #ff9800;
+    box-shadow: 0 2px 8px rgba(255, 152, 0, 0.15);
+}
+
+.privilege-control.enabled {
+    background: linear-gradient(135deg, #e8f5e8 0%, #f1f8e9 100%);
+    border-color: #66bb6a;
+}
+
+.privilege-control.enabled:hover {
+    background: linear-gradient(135deg, #dcedc8 0%, #e8f5e8 100%);
+    border-color: #4caf50;
+    box-shadow: 0 2px 8px rgba(76, 175, 80, 0.15);
+}
+
+/* Custom checkbox styling */
+.privilege-checkbox {
+    position: relative;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+}
+
+.privilege-checkbox input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    cursor: pointer;
+    height: 0;
+    width: 0;
+}
+
+.privilege-checkbox .checkmark {
+    position: relative;
+    height: 22px;
+    width: 22px;
+    background: #ffffff;
+    border: 2px solid #ddd;
+    border-radius: 4px;
+    margin-right: 12px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.privilege-checkbox:hover .checkmark {
+    border-color: #ff9800;
+    box-shadow: 0 0 0 3px rgba(255, 152, 0, 0.1);
+}
+
+.privilege-checkbox input:checked~.checkmark {
+    background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+    border-color: #ff9800;
+    box-shadow: 0 2px 8px rgba(255, 152, 0, 0.3);
+}
+
+.privilege-checkbox input:checked~.checkmark:after {
+    content: '';
+    position: absolute;
+    left: 7px;
+    top: 3px;
+    width: 6px;
+    height: 10px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+/* Label styling */
+.privilege-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 500;
+    color: #333;
+    line-height: 1.4;
+}
+
+.privilege-icon {
+    color: #ff9800;
+    font-size: 18px;
+    margin-right: 4px;
+}
+
+.privilege-text {
+    font-size: 14px;
+}
+
+.privilege-description {
+    font-size: 12px;
+    color: #666;
+    margin-top: 2px;
+    font-weight: 400;
+}
+
+/* Status indicator */
+.privilege-status {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: #ff9800;
+    color: white;
+    font-weight: 500;
+    opacity: 0;
+    transform: translateY(-2px);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.privilege-control.enabled .privilege-status {
+    opacity: 1;
+    transform: translateY(0);
+    background: #4caf50;
+}
+
+/* Security warning */
+.privilege-warning {
+    font-size: 11px;
+    color: #e65100;
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    opacity: 0;
+    transform: translateY(-5px);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.privilege-control.enabled .privilege-warning {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.privilege-warning i {
+    color: #ff5722;
+}
+
+/* Integration with existing form styles */
+.form-group .privilege-control {
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+
+/* Specific positioning for editor actions */
+.editor-actions .privilege-control {
+    margin: 12px 0;
+    width: 100%;
+}
+
+/* Tab actions spacing */
+.tab-actions {
+    margin-top: 16px;
+}
+
+/* Animation for privilege escalation activation */
+@keyframes privilegeActivate {
+    0% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.02);
+    }
+
+    100% {
+        transform: scale(1);
+    }
+}
+
+.privilege-control.enabled {
+    animation: privilegeActivate 0.4s ease-out;
+}
+
+/* Enhanced hover states */
+.privilege-control:hover .privilege-icon {
+    transform: scale(1.1);
+    transition: transform 0.2s ease;
+}
+
+.privilege-control.enabled .privilege-icon {
+    color: #4caf50;
+}
+
+/* Accessibility improvements */
+.privilege-checkbox:focus-within .checkmark {
+    outline: 2px solid #2196f3;
+    outline-offset: 2px;
+}
+
+/* Dark theme support (future-ready) */
+@media (prefers-color-scheme: dark) {
+    .privilege-control {
+        background: linear-gradient(135deg, #2d2d30 0%, #252526 100%);
+        border-color: #404040;
+        color: #cccccc;
+    }
+
+    .privilege-control:hover {
+        background: linear-gradient(135deg, #333333 0%, #2d2d30 100%);
+        border-color: #ff9800;
+    }
+
+    .privilege-checkbox .checkmark {
+        background: #1e1e1e;
+        border-color: #404040;
+    }
+
+    .privilege-text {
+        color: #cccccc;
+    }
+
+    .privilege-description {
+        color: #999999;
+    }
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .privilege-control {
+        padding: 10px 12px;
+        margin: 10px 0;
+    }
+
+    .privilege-checkbox .checkmark {
+        height: 20px;
+        width: 20px;
+    }
+
+    .privilege-checkbox input:checked~.checkmark:after {
+        left: 6px;
+        top: 2px;
+        width: 5px;
+        height: 9px;
+    }
+
+    .privilege-text {
+        font-size: 13px;
+    }
+
+    .privilege-description {
+        font-size: 11px;
     }
 }
