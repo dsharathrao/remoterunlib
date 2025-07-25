@@ -135,23 +135,24 @@ The `remoterunlib` Dashboard provides a modern, enterprise-grade web interface f
 ### Dashboard Screenshots
 
 #### 1. Dashboard Home
-![Dashboard Home](assets/dashboard/dashboard1.png)
+![Dashboard Home](https://raw.githubusercontent.com/dsharathrao/remoterunlib/refs/heads/dev/asserts/dashboard/dashboard1.png)
 
 #### 2. Machine Management
-![Machine Management](assets/dashboard/dashboard2.png)
+![Machine Management](https://raw.githubusercontent.com/dsharathrao/remoterunlib/refs/heads/dev/asserts/dashboard/dashboard2.png)
 
 #### 3. Execute CLI Commands
-![Execute CLI Commands](assets/dashboard/dashboard3.png)
+![Execute CLI Commands](https://raw.githubusercontent.com/dsharathrao/remoterunlib/refs/heads/dev/asserts/dashboard/dashboard3.png)
 
 #### 4. Run Python Scripts
-![Run Python Scripts](assets/dashboard/dashboard4.png)
+![Run Python Scripts](https://raw.githubusercontent.com/dsharathrao/remoterunlib/refs/heads/dev/asserts/dashboard/dashboard4.png)
 
 #### 5. Run Ansible Playbooks
-![Run Ansible Playbooks](assets/dashboard/dashboard5.png)
+![Run Ansible Playbooks](https://raw.githubusercontent.com/dsharathrao/remoterunlib/refs/heads/dev/asserts/dashboard/dashboard5.png)
 
 #### 6. Run Terraform Playbooks
-![Run Terraform Playbooks](assets/dashboard/dashboard6.png)
+![Run Terraform Playbooks](https://raw.githubusercontent.com/dsharathrao/remoterunlib/refs/heads/dev/asserts/dashboard/dashboard6.png)
 
+### Many more...
 ---
 
 ### Quick Start
