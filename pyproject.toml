@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "remoterunlib"
-version = "0.7"
-description = "remoterunlib is a Python library that facilitates remote command execution"
+version = "0.7.1"
+description = "Enterprise remote management library for SSH, Docker, Ansible, Terraform, PowerShell, and web dashboard automation."
 readme = "README.md"
 authors = ["Sharath Kumar <dsharathrao@gmail.com>"]
 repository = "https://github.com/dsharathrao/remoterunlib"
