@@ -2549,3 +2549,1798 @@ body {
         font-size: 11px;
     }
 }
+
+/* ===== DOCKER SPECIFIC STYLES ===== */
+
+/* Container Filter Control - Professional Styling */
+.container-filter-control {
+    display: flex;
+    align-items: center;
+}
+
+.filter-label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    margin: 0;
+    font-weight: 500;
+    color: #333;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.filter-label:hover {
+    color: #1976D2;
+}
+
+.filter-checkbox {
+    margin-right: 10px;
+    width: 16px;
+    height: 16px;
+    accent-color: #dbdcdd;
+    cursor: pointer;
+}
+
+.filter-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+}
+
+.filter-main-text {
+    font-weight: 500;
+    color: #ffffff;
+    font-size: 14px;
+    transition: color 0.2s ease;
+}
+
+.filter-sub-text {
+    font-size: 11px;
+    color: #fff;
+    font-weight: 400;
+    margin-top: 1px;
+    opacity: 0.8;
+    transition: all 0.2s ease;
+}
+
+.filter-label:hover .filter-main-text {
+    color: #fff;
+}
+
+.filter-label:hover .filter-sub-text {
+    color: #fff;
+    opacity: 1;
+}
+
+/* Enhanced visual feedback when checkbox is checked/unchecked */
+.filter-checkbox:checked+.filter-text .filter-main-text {
+    color: #fff;
+}
+
+.filter-checkbox:checked+.filter-text .filter-sub-text {
+    color: #fff;
+    opacity: 0.9;
+}
+
+/* Docker Overview Section */
+.docker-overview {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.docker-status-card {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+}
+
+.docker-status-card .status-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.docker-status-card .status-header h4 {
+    margin: 0;
+    color: #2196F3;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 16px;
+}
+
+.docker-status-card .status-content {
+    padding: 0;
+    background: transparent;
+}
+
+.docker-status-card .info-placeholder {
+    text-align: center;
+    color: #666;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    padding: 40px 20px;
+}
+
+.docker-status-card .info-placeholder i {
+    font-size: 48px;
+    color: #2196F3;
+    margin-bottom: 10px;
+}
+
+/* Docker Quick Stats */
+.docker-quick-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 15px;
+}
+
+.docker-quick-stats .stat-item {
+    background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+    text-align: center;
+    transition: transform 0.2s ease;
+}
+
+.docker-quick-stats .stat-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(33, 150, 243, 0.3);
+}
+
+.docker-quick-stats .stat-item i {
+    font-size: 24px;
+    margin-bottom: 8px;
+    display: block;
+}
+
+.docker-quick-stats .stat-label {
+    display: block;
+    font-size: 12px;
+    opacity: 0.9;
+    margin-bottom: 4px;
+}
+
+.docker-quick-stats .stat-value {
+    display: block;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+/* Docker Sections */
+.docker-images-section,
+.docker-containers-section,
+.docker-networks-section,
+.docker-volumes-section,
+.docker-actions-section {
+    background: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.section-header h4 {
+    margin: 0;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.section-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.section-actions label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 0;
+    font-size: 14px;
+    color: #666;
+}
+
+/* Docker Table Container - Enhanced */
+.docker-table-container {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    transition: all 0.3s ease;
+}
+
+.docker-table-container:hover {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    transform: translateY(-1px);
+}
+
+.docker-table-container .table-wrapper {
+    max-height: 600px;
+    overflow: auto;
+    position: relative;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.docker-output {
+    background: transparent;
+    border: none;
+    margin: 0;
+    padding: 16px 20px;
+    font-family: 'SF Mono', 'JetBrains Mono', Monaco, 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 13px;
+    white-space: pre;
+    color: #1f2937;
+    min-height: 300px;
+    line-height: 1.8;
+    transition: all 0.2s ease;
+    border-radius: 8px;
+    position: relative;
+}
+
+/* Enhanced Docker table styling */
+.docker-output:hover {
+    background: rgba(59, 130, 246, 0.02);
+    cursor: pointer;
+}
+
+/* Docker table header styling */
+.docker-output::first-line {
+    font-weight: 700;
+    color: #1e40af;
+    background: linear-gradient(90deg, #eff6ff 0%, #dbeafe 100%);
+    padding: 14px 20px;
+    border-bottom: 2px solid #3b82f6;
+    border-radius: 8px 8px 0 0;
+    display: block;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 11px;
+}
+
+/* Enhanced Docker Section Headers */
+.section-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 16px 24px;
+    border-radius: 12px 12px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 0 0 0 0;
+    box-shadow: 0 2px 4px rgba(102, 126, 234, 0.2);
+}
+
+.section-header h4 {
+    margin: 0;
+    font-weight: 600;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.section-header h4 i {
+    font-size: 18px;
+    opacity: 0.9;
+}
+
+.section-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.section-actions .btn {
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.section-actions .btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
+    transform: translateY(-1px);
+}
+
+/* Docker Table Row Styling */
+.docker-output::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: linear-gradient(180deg, #3b82f6 0%, #1d4ed8 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.docker-output:hover::before {
+    opacity: 1;
+}
+
+/* Docker Table Styling */
+.docker-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #ffffff;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    font-family: 'SF Mono', 'JetBrains Mono', Monaco, 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 13px;
+}
+
+.docker-table thead {
+    background: linear-gradient(90deg, #3b82f6 0%, #1d4ed8 100%);
+    color: white;
+}
+
+.docker-table th {
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border: none;
+}
+
+.docker-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #e5e7eb;
+    vertical-align: middle;
+    color: #374151;
+    line-height: 1.4;
+}
+
+.docker-table tbody tr {
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.docker-table tbody tr:hover {
+    background: linear-gradient(90deg, rgba(59, 130, 246, 0.05) 0%, rgba(147, 197, 253, 0.05) 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(59, 130, 246, 0.1);
+}
+
+.docker-table tbody tr:nth-child(even) {
+    background: rgba(248, 250, 252, 0.5);
+}
+
+.docker-table tbody tr:nth-child(even):hover {
+    background: linear-gradient(90deg, rgba(59, 130, 246, 0.05) 0%, rgba(147, 197, 253, 0.05) 100%);
+}
+
+/* Status indicators */
+.docker-table .status-running {
+    color: #059669;
+    font-weight: 600;
+}
+
+.docker-table .status-stopped {
+    color: #dc2626;
+    font-weight: 600;
+}
+
+.docker-table .status-exited {
+    color: #d97706;
+    font-weight: 600;
+}
+
+/* Container ID styling */
+.docker-table .container-id {
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 12px;
+    color: #6366f1;
+    font-weight: 500;
+}
+
+/* Image name styling */
+.docker-table .image-name {
+    color: #059669;
+    font-weight: 500;
+}
+
+/* Docker output message styling */
+.docker-output-message {
+    padding: 40px 20px;
+    text-align: center;
+    color: #6b7280;
+    font-style: italic;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    border-radius: 8px;
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+}
+
+/* Container Actions Panel */
+.container-actions-panel {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    margin-top: 20px;
+    padding: 15px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.actions-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.actions-header h5 {
+    margin: 0;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.container-action-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.button-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.button-group .btn {
+    flex: 1;
+    min-width: 100px;
+}
+
+/* Docker Action Cards */
+.action-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 20px;
+}
+
+.action-card {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    transition: box-shadow 0.2s ease;
+}
+
+.action-card:hover {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.action-card .card-header {
+    background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+    color: white;
+    padding: 15px 20px;
+}
+
+.action-card .card-header h5 {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.action-card .card-body {
+    padding: 20px;
+}
+
+.action-card .form-group {
+    margin-bottom: 15px;
+}
+
+/* Enhanced Docker Action Cards */
+.action-card .card-header h5 i {
+    font-size: 16px;
+}
+
+.cleanup-warning {
+    animation: warningPulse 2s infinite;
+}
+
+@keyframes warningPulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.8;
+    }
+}
+
+/* Container Stats Visualization */
+.stats-display {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    padding: 15px;
+    margin-top: 10px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+}
+
+/* Docker Compose Editor */
+#compose-content {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    resize: vertical;
+}
+
+/* Enhanced Docker Table Styling */
+.docker-output {
+    line-height: 1.4;
+    letter-spacing: 0.5px;
+}
+
+.docker-output:hover {
+    background: #f0f8ff;
+    transition: background-color 0.2s ease;
+}
+
+/* === PROFESSIONAL DOCKER INFO DISPLAY === */
+
+/* Main container for professional Docker info */
+.docker-info-professional {
+    background: #fff;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+/* Docker header with version and status */
+.docker-header-info {
+    background: linear-gradient(135deg, #1976D2 0%, #0D47A1 100%);
+    padding: 20px;
+    margin-bottom: 0;
+}
+
+.docker-version-card {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    color: white;
+}
+
+.docker-version-card .card-icon {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    padding: 12px;
+    backdrop-filter: blur(10px);
+}
+
+.docker-version-card .card-icon i {
+    font-size: 24px;
+    color: #64B5F6;
+}
+
+.docker-version-card .card-content h4 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: white;
+}
+
+.docker-version-card .card-content .version-text {
+    margin: 4px 0 0 0;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.9);
+    font-family: 'Courier New', monospace;
+}
+
+.docker-version-card .status-indicator {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.docker-version-card .status-indicator.online i {
+    color: #4CAF50;
+    animation: statusPulse 2s infinite;
+}
+
+.docker-version-card .status-indicator.unknown i {
+    color: #FF9800;
+}
+
+@keyframes statusPulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.6;
+    }
+}
+
+/* Overview grid for system information */
+.docker-overview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    padding: 25px;
+    background: #f8f9fa;
+}
+
+.overview-card {
+    background: white;
+    border: 1px solid #e0e7ff;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.overview-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
+}
+
+.overview-card .card-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 15px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.overview-card .card-header i {
+    font-size: 16px;
+    opacity: 0.9;
+}
+
+.overview-card .card-body {
+    padding: 20px;
+}
+
+.metric-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f4f8;
+    font-size: 13px;
+}
+
+.metric-row:last-child {
+    border-bottom: none;
+}
+
+.metric-label {
+    color: #64748b;
+    font-weight: 500;
+}
+
+.metric-value {
+    color: #1e293b;
+    font-weight: 600;
+    font-family: 'Segoe UI', -apple-system, sans-serif;
+}
+
+.metric-value.highlight {
+    color: #2563eb;
+    background: #eff6ff;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+.metric-value.success {
+    color: #059669;
+    background: #ecfdf5;
+    padding: 2px 8px;
+    border-radius: 6px;
+}
+
+.metric-value.warning {
+    color: #d97706;
+    background: #fffbeb;
+    padding: 2px 8px;
+    border-radius: 6px;
+}
+
+.metric-value.muted {
+    color: #6b7280;
+    background: #f9fafb;
+    padding: 2px 8px;
+    border-radius: 6px;
+}
+
+.metric-value.small {
+    font-size: 11px;
+    font-family: 'Courier New', monospace;
+    color: #6b7280;
+}
+
+/* Docker warnings section */
+.docker-warnings {
+    background: #fef3cd;
+    border-top: 1px solid #fbbf24;
+    margin: 0;
+}
+
+.warnings-header {
+    background: #f59e0b;
+    color: white;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.warnings-list {
+    padding: 15px 20px;
+}
+
+.warning-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: #92400e;
+    line-height: 1.5;
+}
+
+.warning-item:last-child {
+    margin-bottom: 0;
+}
+
+.warning-item i {
+    color: #f59e0b;
+    margin-top: 2px;
+    font-size: 11px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .docker-overview-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+        padding: 15px;
+    }
+
+    .docker-version-card {
+        flex-direction: column;
+        text-align: center;
+        gap: 10px;
+    }
+
+    .docker-version-card .status-indicator {
+        margin: 0;
+    }
+
+    .metric-row {
+        font-size: 12px;
+    }
+}
+
+/* Integration with existing Docker quick stats */
+.docker-quick-stats .stat-item .stat-value {
+    animation: valueUpdate 0.5s ease-out;
+}
+
+@keyframes valueUpdate {
+    0% {
+        transform: scale(1.1);
+        opacity: 0.8;
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+/* Docker Machine Selector Enhancement */
+#docker-machine-select {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border: 2px solid #2196F3;
+    border-radius: 6px;
+    font-weight: 500;
+}
+
+#docker-machine-select:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
+    border-color: #1976D2;
+}
+
+/* Quick Stats Enhancement */
+.docker-quick-stats .stat-item {
+    position: relative;
+    overflow: hidden;
+}
+
+.docker-quick-stats .stat-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+    transition: left 0.5s ease;
+}
+
+.docker-quick-stats .stat-item:hover::before {
+    left: 100%;
+}
+
+/* Advanced Container Actions */
+.container-actions-panel {
+    border-left: 4px solid #2196F3;
+    background: linear-gradient(135deg, #ffffff 0%, #f8fffe 100%);
+}
+
+.container-actions-panel.active {
+    box-shadow: 0 4px 12px rgba(33, 150, 243, 0.15);
+    border-left-color: #4CAF50;
+}
+
+/* Docker Tab Enhancement */
+#docker-section .tab-btn {
+    position: relative;
+    transition: all 0.3s ease;
+}
+
+#docker-section .tab-btn::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    width: 0;
+    height: 3px;
+    background: #2196F3;
+    transition: all 0.3s ease;
+    transform: translateX(-50%);
+}
+
+#docker-section .tab-btn.active::after {
+    width: 100%;
+}
+
+#docker-section .tab-btn:hover {
+    background: rgba(33, 150, 243, 0.1);
+    transform: translateY(-1px);
+}
+
+/* Real-time Updates Animation */
+.docker-status-card.updating {
+    animation: statusUpdate 1s ease-in-out;
+}
+
+@keyframes statusUpdate {
+    0% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.02);
+    }
+
+    100% {
+        transform: scale(1);
+    }
+}
+
+/* Enhanced Error Display */
+.error-message {
+    background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
+    border-left: 4px solid #f44336;
+    border-radius: 4px;
+    padding: 15px;
+    animation: errorSlide 0.3s ease-out;
+}
+
+@keyframes errorSlide {
+    from {
+        opacity: 0;
+        transform: translateX(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* Success Message Enhancement */
+.success-message {
+    background: linear-gradient(135deg, #e8f5e8 0%, #c8e6c9 100%);
+    border-left: 4px solid #4caf50;
+    border-radius: 4px;
+    padding: 15px;
+    animation: successSlide 0.3s ease-out;
+}
+
+@keyframes successSlide {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Docker Loading State */
+.docker-loading {
+    position: relative;
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.docker-loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    margin: -10px 0 0 -10px;
+    border: 2px solid #e0e0e0;
+    border-top: 2px solid #2196F3;
+    border-radius: 50%;
+    animation: dockerSpin 1s linear infinite;
+}
+
+@keyframes dockerSpin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.action-card .form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+    color: #333;
+}
+
+.action-card .form-control {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.action-card .form-control:focus {
+    outline: none;
+    border-color: #2196F3;
+    box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
+}
+
+.action-card textarea.form-control {
+    resize: vertical;
+    min-height: 60px;
+}
+
+.action-card .btn {
+    width: 100%;
+    padding: 10px;
+    font-weight: 500;
+}
+
+/* Docker-specific button colors */
+.btn.docker-pull {
+    background: #4CAF50;
+    border-color: #4CAF50;
+}
+
+.btn.docker-pull:hover {
+    background: #45a049;
+    border-color: #45a049;
+}
+
+.btn.docker-run {
+    background: #2196F3;
+    border-color: #2196F3;
+}
+
+.btn.docker-run:hover {
+    background: #1976D2;
+    border-color: #1976D2;
+}
+
+.btn.docker-stop {
+    background: #FF9800;
+    border-color: #FF9800;
+}
+
+.btn.docker-stop:hover {
+    background: #F57C00;
+    border-color: #F57C00;
+}
+
+.btn.docker-remove {
+    background: #f44336;
+    border-color: #f44336;
+}
+
+.btn.docker-remove:hover {
+    background: #d32f2f;
+    border-color: #d32f2f;
+}
+
+/* Docker Tab Styling */
+#docker-section .tab-btn.active {
+    background: #2196F3;
+    color: white;
+    border-color: #2196F3;
+}
+
+#docker-section .tab-btn:hover {
+    background: #e3f2fd;
+    border-color: #2196F3;
+}
+
+/* Responsive Design for Docker Section */
+@media (max-width: 768px) {
+    .docker-quick-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .action-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .button-group {
+        flex-direction: column;
+    }
+
+    .button-group .btn {
+        min-width: unset;
+    }
+
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .section-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
+
+@media (max-width: 480px) {
+    .docker-quick-stats {
+        grid-template-columns: 1fr;
+    }
+
+    .docker-status-card .status-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+}
+
+/* === ENTERPRISE DOCKER DASHBOARD === */
+
+.enterprise-docker-panel {
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Status Header - Compact */
+.docker-status-header {
+    background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.docker-status-header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(147, 197, 253, 0.1) 100%);
+    pointer-events: none;
+}
+
+.status-primary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+    z-index: 1;
+}
+
+.docker-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #ffffff;
+}
+
+.docker-brand i {
+    font-size: 20px;
+    color: #60a5fa;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.brand-text {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+}
+
+.version-badge {
+    background: rgba(255, 255, 255, 0.15);
+    color: #f1f5f9;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 500;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.health-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+    z-index: 1;
+}
+
+.health-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #ef4444;
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+}
+
+.health-indicator.healthy .health-dot {
+    background: #10b981;
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+    animation: healthPulse 2s infinite;
+}
+
+.health-text {
+    color: #f1f5f9;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+/* Stats Grid */
+.docker-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.stat {
+    text-align: center;
+    padding: 16px 12px;
+    border-right: 1px solid #e2e8f0;
+    transition: background-color 0.2s;
+}
+
+.stat:last-child {
+    border-right: none;
+}
+
+.stat:hover {
+    background: #f1f5f9;
+}
+
+.stat-number {
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 4px;
+}
+
+.stat-text {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #64748b;
+    font-weight: 500;
+}
+
+/* Color coding for stats */
+.stat.running .stat-number {
+    color: #059669;
+}
+
+.stat.stopped .stat-number {
+    color: #dc2626;
+}
+
+.stat.images .stat-number {
+    color: #7c3aed;
+}
+
+.stat.cpu .stat-number {
+    color: #ea580c;
+}
+
+/* Details Section */
+.docker-details {
+    padding: 12px 16px;
+    background: #ffffff;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    font-size: 12px;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.detail-row:last-child {
+    border-bottom: none;
+}
+
+.detail-row span:first-child {
+    color: #64748b;
+    font-weight: 500;
+}
+
+.detail-row span:last-child {
+    color: #1e293b;
+    font-weight: 600;
+    font-family: monospace;
+}
+
+/* Warnings */
+.docker-warnings {
+    background: #fef3cd;
+    color: #92400e;
+    padding: 8px 16px;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-top: 1px solid #fbbf24;
+}
+
+.docker-warnings i {
+    color: #f59e0b;
+}
+
+/* Pulse animation */
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .docker-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .docker-header {
+        flex-direction: column;
+        gap: 8px;
+        text-align: center;
+    }
+
+    .stat {
+        padding: 12px 8px;
+    }
+
+    .stat-number {
+        font-size: 18px;
+    }
+}
+
+.warning-more {
+    font-size: 10px;
+    color: #d97706;
+    font-weight: 500;
+    margin-top: 4px;
+}
+
+/* Responsive adjustments for compact layout */
+@media (max-width: 768px) {
+    .docker-metrics-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+        padding: 12px;
+    }
+
+    .docker-engine-header {
+        flex-direction: column;
+        gap: 8px;
+        text-align: center;
+    }
+
+    .metric-item {
+        font-size: 10px;
+    }
+}
+
+/* Integration with existing Docker styles */
+.docker-status-card .status-content {
+    padding: 0;
+    background: transparent;
+}
+
+/* === ENTERPRISE DOCKER METRICS === */
+
+/* Metrics Dashboard - Compact */
+.metrics-dashboard {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: #e2e8f0;
+    margin: 0;
+}
+
+.metric-card {
+    background: #ffffff;
+    padding: 14px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+    transition: all 0.3s ease;
+    border-bottom: 2px solid transparent;
+}
+
+.metric-card:hover {
+    background: #f8fafc;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.metric-card.primary {
+    border-bottom-color: #10b981;
+}
+
+.metric-card.secondary {
+    border-bottom-color: #f59e0b;
+}
+
+.metric-card.tertiary {
+    border-bottom-color: #8b5cf6;
+}
+
+.metric-card.quaternary {
+    border-bottom-color: #06b6d4;
+}
+
+.metric-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.metric-card.primary .metric-icon {
+    background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+    color: #059669;
+}
+
+.metric-card.secondary .metric-icon {
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    color: #d97706;
+}
+
+.metric-card.tertiary .metric-icon {
+    background: linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 100%);
+    color: #7c3aed;
+}
+
+.metric-card.quaternary .metric-icon {
+    background: linear-gradient(135deg, #ecfeff 0%, #cffafe 100%);
+    color: #0891b2;
+}
+
+.metric-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.metric-value {
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1;
+    color: #1e293b;
+    margin-bottom: 2px;
+}
+
+.metric-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.metric-trend {
+    width: 3px;
+    height: 20px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.metric-trend.positive {
+    background: linear-gradient(180deg, #10b981 0%, #059669 100%);
+}
+
+.metric-trend.negative {
+    background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+}
+
+.metric-trend.neutral {
+    background: linear-gradient(180deg, #94a3b8 0%, #64748b 100%);
+}
+
+/* System Information Grid - Compact */
+.system-info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1px;
+    background: #e2e8f0;
+    margin: 0;
+}
+
+.info-section {
+    background: #ffffff;
+    padding: 12px 16px;
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+    color: #374151;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.section-header i {
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.info-items {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.info-row:last-child {
+    border-bottom: none;
+}
+
+.info-key {
+    font-size: 11px;
+    color: #6b7280;
+    font-weight: 500;
+}
+
+.info-value {
+    font-size: 11px;
+    color: #1f2937;
+    font-weight: 600;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    background: #f8fafc;
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+/* Alert Banner - Compact */
+.alert-banner {
+    background: #ffffff;
+    border-top: 1px solid #e2e8f0;
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.2s ease;
+}
+
+.alert-banner:hover {
+    background: #fefce8;
+}
+
+.alert-banner.warning {
+    border-left: 3px solid #f59e0b;
+}
+
+.alert-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    color: #d97706;
+    flex-shrink: 0;
+    font-size: 12px;
+}
+
+.alert-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.alert-title {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: #92400e;
+    margin-bottom: 1px;
+}
+
+.alert-message {
+    display: block;
+    font-size: 10px;
+    color: #a16207;
+    font-weight: 500;
+}
+
+.alert-action {
+    color: #d97706;
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+/* Enterprise Animations */
+@keyframes healthPulse {
+
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.8;
+        transform: scale(1.1);
+    }
+}
+
+/* Enterprise Responsive Design */
+@media (max-width: 1024px) {
+    .metrics-dashboard {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .system-info-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 640px) {
+    .docker-status-header {
+        flex-direction: column;
+        gap: 12px;
+        text-align: center;
+    }
+
+    .metrics-dashboard {
+        grid-template-columns: 1fr;
+    }
+
+    .metric-card {
+        padding: 16px;
+    }
+
+    .metric-value {
+        font-size: 20px;
+    }
+}
+
+/* Installation Requirements Notice */
+.installation-notice {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #6c757d;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    z-index: 10;
+}
+
+.installation-notice-text {
+    line-height: 1.2;
+}
+
+.installation-info-icon {
+    cursor: pointer;
+    color: #007bff;
+    font-size: 12px;
+    padding: 2px;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.installation-info-icon:hover {
+    color: #0056b3;
+    background-color: rgba(0, 123, 255, 0.1);
+    transform: scale(1.1);
+}
+
+.installation-tooltip {
+    position: absolute;
+    top: 35px;
+    right: 0;
+    background: #2c3e50;
+    color: #ecf0f1;
+    padding: 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.4;
+    width: 320px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-10px);
+    transition: all 0.3s ease;
+    z-index: 1000;
+    border: 1px solid #34495e;
+}
+
+.installation-tooltip::before {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    right: 15px;
+    width: 12px;
+    height: 12px;
+    background: #2c3e50;
+    border: 1px solid #34495e;
+    border-top: none;
+    border-left: none;
+    transform: rotate(45deg);
+}
+
+.installation-info-icon:hover .installation-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+.installation-tooltip h6 {
+    color: #3498db;
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    border-bottom: 1px solid #34495e;
+    padding-bottom: 6px;
+}
+
+.distro-section {
+    margin-bottom: 12px;
+}
+
+.distro-section:last-child {
+    margin-bottom: 0;
+}
+
+.distro-name {
+    color: #e74c3c;
+    font-weight: 600;
+    font-size: 11px;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.distro-commands {
+    background: #34495e;
+    padding: 8px;
+    border-radius: 4px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+    font-size: 11px;
+    border-left: 3px solid #3498db;
+}
+
+.distro-commands code {
+    color: #2ecc71;
+    background: none;
+    padding: 0;
+    font-size: inherit;
+}
+
+/* Script Panel Positioning for Installation Notice */
+.script-panel {
+    position: relative;
+}

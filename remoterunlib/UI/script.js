@@ -33,6 +33,7 @@ class RemoteRunApp {
         this.setupFileUploads();
         this.setupTabs();
         this.setupCodeEditors();
+        this.setupDockerInterface();
         this.startPingInterval();
 
         // Add event listener for Execute Command button
@@ -242,6 +243,19 @@ class RemoteRunApp {
         this.initAutoLogsManagement();
     }
 
+    // === UTILITY METHODS ===
+    escapeHtml(unsafe) {
+        if (typeof unsafe !== 'string') {
+            return String(unsafe || '');
+        }
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
     // === PRIVILEGE CONTROLS MANAGEMENT ===
     initPrivilegeControls() {
         // Initialize all privilege control checkboxes
@@ -409,6 +423,30 @@ class RemoteRunApp {
                 }
 
                 this.addLog('🔍 Auto-opened logs for execution monitoring', 'info');
+            }
+        }
+    }
+
+    displayOutput(elementId, result) {
+        // Auto-open logs for better visibility
+        this.autoOpenLogs();
+
+        // Display the output using the existing log system
+        if (result.success) {
+            if (result.output) {
+                // Format output with proper line breaks
+                const formattedOutput = result.output.replace(/\n/g, '\n    ');
+                this.addLog(`📋 Output:\n    ${formattedOutput}`, 'success');
+            }
+        } else {
+            // Display error information
+            const errorMsg = result.error || result.errors || 'Unknown error';
+            this.addLog(`❌ Error: ${errorMsg}`, 'error');
+
+            // Also display any output that might be available
+            if (result.output) {
+                const formattedOutput = result.output.replace(/\n/g, '\n    ');
+                this.addLog(`📋 Output:\n    ${formattedOutput}`, 'info');
             }
         }
     }
@@ -3858,6 +3896,1566 @@ class RemoteRunApp {
         const sizes = ['Bytes', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // === DOCKER MANAGEMENT METHODS ===
+
+    setupDockerInterface() {
+        // Docker machine selection
+        const dockerMachineSelect = document.getElementById('docker-machine-select');
+        if (dockerMachineSelect) {
+            dockerMachineSelect.addEventListener('change', () => {
+                this.onDockerMachineChange();
+            });
+        }
+
+        // Tab switching for Docker
+        document.querySelectorAll('#docker-section .tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.switchDockerTab(btn.dataset.tab);
+            });
+        });
+
+        // Refresh buttons
+        const refreshDockerInfoBtn = document.getElementById('refresh-docker-info-btn');
+        if (refreshDockerInfoBtn) {
+            refreshDockerInfoBtn.addEventListener('click', () => this.refreshDockerInfo());
+        }
+
+        const refreshImagesBtn = document.getElementById('refresh-images-btn');
+        if (refreshImagesBtn) {
+            refreshImagesBtn.addEventListener('click', () => this.refreshDockerImages());
+        }
+
+        const refreshContainersBtn = document.getElementById('refresh-containers-btn');
+        if (refreshContainersBtn) {
+            refreshContainersBtn.addEventListener('click', () => this.refreshDockerContainers());
+        }
+
+        const refreshNetworksBtn = document.getElementById('refresh-networks-btn');
+        if (refreshNetworksBtn) {
+            refreshNetworksBtn.addEventListener('click', () => this.refreshDockerNetworks());
+        }
+
+        const refreshVolumesBtn = document.getElementById('refresh-volumes-btn');
+        if (refreshVolumesBtn) {
+            refreshVolumesBtn.addEventListener('click', () => this.refreshDockerVolumes());
+        }
+
+        // Show all containers checkbox
+        const showAllContainers = document.getElementById('show-all-containers');
+        if (showAllContainers) {
+            showAllContainers.addEventListener('change', () => {
+                this.updateContainerFilterLabel();
+                this.refreshDockerContainers();
+            });
+            // Initialize label on page load
+            this.updateContainerFilterLabel();
+        }
+
+        // Action buttons
+        const pullImageBtn = document.getElementById('pull-image-btn');
+        if (pullImageBtn) {
+            pullImageBtn.addEventListener('click', () => this.showPullImageDialog());
+        }
+
+        const runContainerBtn = document.getElementById('run-container-btn');
+        if (runContainerBtn) {
+            runContainerBtn.addEventListener('click', () => this.showRunContainerDialog());
+        }
+
+        // Execute buttons in Actions tab
+        const executePullBtn = document.getElementById('execute-pull-btn');
+        if (executePullBtn) {
+            executePullBtn.addEventListener('click', () => this.executePullImage());
+        }
+
+        const executeRunBtn = document.getElementById('execute-run-btn');
+        if (executeRunBtn) {
+            executeRunBtn.addEventListener('click', () => this.executeRunContainer());
+        }
+
+        const executeExecBtn = document.getElementById('execute-exec-btn');
+        if (executeExecBtn) {
+            executeExecBtn.addEventListener('click', () => this.executeContainerCommand());
+        }
+
+        // New enhanced action buttons
+        const executeStatsBtn = document.getElementById('execute-stats-btn');
+        if (executeStatsBtn) {
+            executeStatsBtn.addEventListener('click', () => this.executeContainerStats());
+        }
+
+        const executeComposeUpBtn = document.getElementById('execute-compose-up-btn');
+        if (executeComposeUpBtn) {
+            executeComposeUpBtn.addEventListener('click', () => this.executeDockerCompose());
+        }
+
+        const executePruneBtn = document.getElementById('execute-prune-btn');
+        if (executePruneBtn) {
+            executePruneBtn.addEventListener('click', () => this.executeSystemPrune());
+        }
+
+        // Container action buttons
+        const startContainerBtn = document.getElementById('start-container-btn');
+        if (startContainerBtn) {
+            startContainerBtn.addEventListener('click', () => this.containerAction('start'));
+        }
+
+        const stopContainerBtn = document.getElementById('stop-container-btn');
+        if (stopContainerBtn) {
+            stopContainerBtn.addEventListener('click', () => this.containerAction('stop'));
+        }
+
+        const restartContainerBtn = document.getElementById('restart-container-btn');
+        if (restartContainerBtn) {
+            restartContainerBtn.addEventListener('click', () => this.containerAction('restart'));
+        }
+
+        const removeContainerBtn = document.getElementById('remove-container-btn');
+        if (removeContainerBtn) {
+            removeContainerBtn.addEventListener('click', () => this.containerAction('remove'));
+        }
+
+        const containerLogsBtn = document.getElementById('container-logs-btn');
+        if (containerLogsBtn) {
+            containerLogsBtn.addEventListener('click', () => this.viewContainerLogs());
+        }
+
+        const containerExecBtn = document.getElementById('container-exec-btn');
+        if (containerExecBtn) {
+            containerExecBtn.addEventListener('click', () => this.execContainerCommand());
+        }
+
+        const containerInspectBtn = document.getElementById('container-inspect-btn');
+        if (containerInspectBtn) {
+            containerInspectBtn.addEventListener('click', () => this.inspectContainer());
+        }
+
+        const containerDebugBtn = document.getElementById('container-debug-btn');
+        if (containerDebugBtn) {
+            containerDebugBtn.addEventListener('click', () => this.debugContainer());
+        }
+
+        const closeContainerActions = document.getElementById('close-container-actions');
+        if (closeContainerActions) {
+            closeContainerActions.addEventListener('click', () => {
+                document.getElementById('container-actions-panel').style.display = 'none';
+            });
+        }
+    }
+
+    switchDockerTab(tabName) {
+        // Remove active class from all tabs and content
+        document.querySelectorAll('#docker-section .tab-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelectorAll('#docker-section .tab-pane').forEach(pane => {
+            pane.classList.remove('active');
+        });
+
+        // Add active class to selected tab and content
+        document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+        document.getElementById(`${tabName}-tab`).classList.add('active');
+
+        // Load data for the selected tab
+        const machineId = document.getElementById('docker-machine-select').value;
+        if (machineId) {
+            switch (tabName) {
+                case 'overview-docker':
+                    this.refreshDockerInfo();
+                    break;
+                case 'images-docker':
+                    this.refreshDockerImages();
+                    break;
+                case 'containers-docker':
+                    this.refreshDockerContainers();
+                    break;
+                case 'networks-docker':
+                    this.refreshDockerNetworks();
+                    break;
+                case 'volumes-docker':
+                    this.refreshDockerVolumes();
+                    break;
+                case 'actions-docker':
+                    // Refresh containers and images to populate dropdowns in actions tab
+                    this.refreshDockerContainers();
+                    this.refreshDockerImages();
+                    break;
+            }
+        }
+    }
+
+    onDockerMachineChange() {
+        const machineId = document.getElementById('docker-machine-select').value;
+        if (machineId) {
+            // Reset all content
+            this.resetDockerContent();
+            // Load current tab data
+            const activeTab = document.querySelector('#docker-section .tab-btn.active').dataset.tab;
+            this.switchDockerTab(activeTab);
+        } else {
+            this.resetDockerContent();
+        }
+    }
+
+    resetDockerContent() {
+        // Reset overview
+        document.getElementById('docker-info-content').innerHTML = `
+            <div class="info-placeholder">
+                <i class="fab fa-docker"></i>
+                <p>Select a machine to view Docker information</p>
+            </div>
+        `;
+
+        // Reset quick stats
+        document.getElementById('docker-images-count').textContent = '-';
+        document.getElementById('docker-containers-count').textContent = '-';
+        document.getElementById('docker-running-count').textContent = '-';
+        document.getElementById('docker-networks-count').textContent = '-';
+        document.getElementById('docker-volumes-count').textContent = '-';
+
+        // Reset table displays
+        this.showDockerMessage('docker-images', 'Select a machine to view Docker images');
+        this.showDockerMessage('docker-containers', 'Select a machine to view Docker containers');
+        this.showDockerMessage('docker-networks', 'Select a machine to view Docker networks');
+        this.showDockerMessage('docker-volumes', 'Select a machine to view Docker volumes');
+
+        // Hide container actions panel
+        document.getElementById('container-actions-panel').style.display = 'none';
+    }
+
+    async refreshDockerInfo() {
+        const machineId = document.getElementById('docker-machine-select').value;
+        if (!machineId) return;
+
+        try {
+            this.showLoading();
+            const response = await fetch('/api/docker/info', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ machine_id: machineId })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                // Parse Docker system info JSON
+                let sysInfo = {};
+                if (result.info) {
+                    try {
+                        sysInfo = JSON.parse(result.info);
+                    } catch (e) {
+                        console.log('Could not parse Docker system info JSON');
+                    }
+                }
+
+                // Create professional Docker info display
+                const infoContent = document.getElementById('docker-info-content');
+                infoContent.innerHTML = this.buildDockerInfoDisplay(result.version, sysInfo);
+
+                // Update quick stats cards
+                this.updateDockerQuickStats(sysInfo);
+
+            } else {
+                document.getElementById('docker-info-content').innerHTML = `
+                    <div class="error-message" style="color: #d32f2f; text-align: center; padding: 20px;">
+                        <i class="fas fa-exclamation-triangle"></i><br>
+                        ${this.escapeHtml(result.error)}
+                    </div>
+                `;
+            }
+        } catch (error) {
+            document.getElementById('docker-info-content').innerHTML = `
+                <div class="error-message" style="color: #d32f2f; text-align: center; padding: 20px;">
+                    <i class="fas fa-exclamation-triangle"></i><br>
+                    Error: ${this.escapeHtml(error.message)}
+                </div>
+            `;
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    buildDockerInfoDisplay(version, sysInfo) {
+        const formatBytes = (bytes) => {
+            if (!bytes) return 'N/A';
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            if (bytes === 0) return '0B';
+            const i = parseInt(Math.floor(Math.log(bytes) / Math.log(1024)));
+            return Math.round(bytes / Math.pow(1024, i)) + sizes[i];
+        };
+
+        const running = sysInfo.ContainersRunning || 0;
+        const total = sysInfo.Containers || 0;
+        const stopped = total - running;
+        const paused = sysInfo.ContainersPaused || 0;
+        const isOnline = sysInfo.ServerVersion ? true : false;
+        const healthStatus = isOnline ? 'healthy' : 'unhealthy';
+
+        return `
+            <div class="enterprise-docker-panel">
+                <!-- Status Header -->
+                <div class="docker-status-header">
+                    <div class="status-primary">
+                        <div class="docker-brand">
+                            <i class="fab fa-docker"></i>
+                            <span class="brand-text">Docker Engine</span>
+                        </div>
+                        <div class="version-badge">v${this.escapeHtml(version || 'Unknown')}</div>
+                    </div>
+                    <div class="health-indicator ${healthStatus}">
+                        <div class="health-dot"></div>
+                        <span class="health-text">${isOnline ? 'Operational' : 'Offline'}</span>
+                    </div>
+                </div>
+
+                <!-- Key Metrics Dashboard -->
+                <div class="metrics-dashboard">
+                    <div class="metric-card primary">
+                        <div class="metric-icon">
+                            <i class="fas fa-play-circle"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${running}</div>
+                            <div class="metric-label">Active Containers</div>
+                        </div>
+                        <div class="metric-trend positive"></div>
+                    </div>
+                    
+                    <div class="metric-card secondary">
+                        <div class="metric-icon">
+                            <i class="fas fa-pause-circle"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${stopped}</div>
+                            <div class="metric-label">Stopped</div>
+                        </div>
+                        <div class="metric-trend neutral"></div>
+                    </div>
+                    
+                    <div class="metric-card tertiary">
+                        <div class="metric-icon">
+                            <i class="fas fa-layer-group"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${sysInfo.Images || 0}</div>
+                            <div class="metric-label">Images</div>
+                        </div>
+                        <div class="metric-trend neutral"></div>
+                    </div>
+                    
+                    <div class="metric-card quaternary">
+                        <div class="metric-icon">
+                            <i class="fas fa-microchip"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${sysInfo.NCPU || 0}</div>
+                            <div class="metric-label">CPU Cores</div>
+                        </div>
+                        <div class="metric-trend neutral"></div>
+                    </div>
+                </div>
+
+                <!-- System Information Grid -->
+                <div class="system-info-grid">
+                    <div class="info-section">
+                        <div class="section-header">
+                            <i class="fas fa-server" style="color: #fff"></i>
+                            <span style="color: #fff">System Resources</span>
+                        </div>
+                        <div class="info-items">
+                            <div class="info-row">
+                                <span class="info-key">Memory</span>
+                                <span class="info-value">${formatBytes(sysInfo.MemTotal)}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Architecture</span>
+                                <span class="info-value">${sysInfo.Architecture || 'Unknown'}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="info-section">
+                        <div class="section-header">
+                            <i class="fas fa-cogs" style="color: #fff"></i>
+                            <span style="color: #fff">Runtime Configuration</span>
+                        </div>
+                        <div class="info-items">
+                            <div class="info-row">
+                                <span class="info-key">Runtime</span>
+                                <span class="info-value">${sysInfo.DefaultRuntime || 'Unknown'}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Storage Driver</span>
+                                <span class="info-value">${sysInfo.Driver || 'Unknown'}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                ${sysInfo.Warnings && sysInfo.Warnings.length > 0 ? `
+                <div class="alert-banner warning">
+                    <div class="alert-icon">
+                        <i class="fas fa-exclamation-triangle"></i>
+                    </div>
+                    <div class="alert-content">
+                        <span class="alert-title">System Alerts</span>
+                        <span class="alert-message">${sysInfo.Warnings.length} warning${sysInfo.Warnings.length > 1 ? 's' : ''} detected</span>
+                    </div>
+                    <div class="alert-action">
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                </div>
+                ` : ''}
+            </div>
+        `;
+    } updateDockerQuickStats(sysInfo) {
+        // Update the quick stats cards in the overview section
+        document.getElementById('docker-images-count').textContent = sysInfo.Images || '0';
+        document.getElementById('docker-containers-count').textContent = sysInfo.Containers || '0';
+        document.getElementById('docker-running-count').textContent = sysInfo.ContainersRunning || '0';
+
+        // Add additional stats if elements exist
+        const pausedElement = document.getElementById('docker-paused-count');
+        if (pausedElement) {
+            pausedElement.textContent = sysInfo.ContainersPaused || '0';
+        }
+
+        const stoppedElement = document.getElementById('docker-stopped-count');
+        if (stoppedElement) {
+            stoppedElement.textContent = sysInfo.ContainersStopped || '0';
+        }
+    }
+
+    async refreshDockerImages() {
+        const machineId = document.getElementById('docker-machine-select').value;
+        if (!machineId) return;
+
+        try {
+            this.showLoading();
+            const response = await fetch('/api/docker/images', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ machine_id: machineId })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.populateImagesTable(result.output);
+
+                // Update images count in quick stats
+                const lines = result.output.split('\n').filter(line => line.trim() && !line.startsWith('REPOSITORY'));
+                document.getElementById('docker-images-count').textContent = lines.length;
+
+                // Populate image dropdown for run container
+                this.populateImageDropdown(lines);
+            } else {
+                this.showDockerMessage('docker-images', `Error: ${result.error}`);
+            }
+        } catch (error) {
+            this.showDockerMessage('docker-images', `Error: ${error.message}`);
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    populateImagesTable(output) {
+        const table = document.getElementById('docker-images-table');
+        const tbody = document.getElementById('docker-images-tbody');
+        const message = document.getElementById('docker-images-message');
+
+        if (!output || output.trim() === '') {
+            table.style.display = 'none';
+            message.style.display = 'block';
+            message.textContent = 'No images found';
+            return;
+        }
+
+        const lines = output.split('\n').filter(line => line.trim());
+        if (lines.length <= 1) {
+            table.style.display = 'none';
+            message.style.display = 'block';
+            message.textContent = 'No images found';
+            return;
+        }
+
+        // Clear existing rows
+        tbody.innerHTML = '';
+
+        // Parse data (skip header)
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+
+            const parts = line.split(/\s+/);
+            if (parts.length >= 5) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="image-name">${this.escapeHtml(parts[0])}</td>
+                    <td>${this.escapeHtml(parts[1])}</td>
+                    <td class="container-id">${this.escapeHtml(parts[2])}</td>
+                    <td>${this.escapeHtml(parts[3])}</td>
+                    <td>${this.escapeHtml(parts[4])}</td>
+                `;
+                tbody.appendChild(row);
+            }
+        }
+
+        table.style.display = 'table';
+        message.style.display = 'none';
+    }
+
+    populateImageDropdown(imageLines) {
+        const imageSelect = document.getElementById('run-image-name');
+        if (!imageSelect) return;
+
+        // Clear existing options except the first one
+        imageSelect.innerHTML = '<option value="">Select an image...</option>';
+
+        // Parse image lines and extract repository:tag
+        imageLines.forEach(line => {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length >= 2) {
+                const repository = parts[0];
+                const tag = parts[1];
+                if (repository && tag && repository !== 'REPOSITORY') {
+                    const imageName = tag === '<none>' ? repository : `${repository}:${tag}`;
+                    const option = document.createElement('option');
+                    option.value = imageName;
+                    option.textContent = imageName;
+                    imageSelect.appendChild(option);
+                }
+            }
+        });
+
+        // Add visual feedback to show dropdown is populated
+        if (imageLines.length > 0) {
+            const firstOption = imageSelect.querySelector('option[value=""]');
+            if (firstOption) {
+                firstOption.textContent = `Select an image (${imageLines.length} available)...`;
+            }
+        }
+    }
+
+    async refreshDockerContainers() {
+        const machineId = document.getElementById('docker-machine-select').value;
+        if (!machineId) return;
+
+        const showAll = document.getElementById('show-all-containers').checked;
+
+        try {
+            this.showLoading();
+            const response = await fetch('/api/docker/containers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ machine_id: machineId, all: showAll })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.populateContainersTable(result.output);
+
+                // Update containers count in quick stats
+                const lines = result.output.split('\n').filter(line => line.trim() && !line.startsWith('CONTAINER'));
+                document.getElementById('docker-containers-count').textContent = lines.length;
+
+                // Count running containers
+                const runningLines = lines.filter(line => line.includes('Up '));
+                document.getElementById('docker-running-count').textContent = runningLines.length;
+
+                // Auto-populate container IDs in action forms
+                this.populateContainerIds(lines);
+            } else {
+                this.showDockerMessage('docker-containers', `Error: ${result.error}`);
+            }
+        } catch (error) {
+            this.showDockerMessage('docker-containers', `Error: ${error.message}`);
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    populateContainersTable(output) {
+        const table = document.getElementById('docker-containers-table');
+        const tbody = document.getElementById('docker-containers-tbody');
+        const message = document.getElementById('docker-containers-message');
+
+        if (!output || output.trim() === '') {
+            table.style.display = 'none';
+            message.style.display = 'block';
+            message.textContent = 'No containers found';
+            return;
+        }
+
+        const lines = output.split('\n').filter(line => line.trim());
+        if (lines.length <= 1) {
+            table.style.display = 'none';
+            message.style.display = 'block';
+            message.textContent = 'No containers found';
+            return;
+        }
+
+        // Clear existing rows
+        tbody.innerHTML = '';
+
+        // Parse data (skip header)
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+
+            const parts = line.split(/\s+/);
+            if (parts.length >= 7) {
+                const containerId = parts[0];
+                const image = parts[1];
+                const command = parts[2];
+                const created = parts[3];
+                const status = parts[4];
+                const ports = parts[5] || '';
+                const names = parts[6];
+
+                // Determine status class and icon
+                let statusClass = '';
+                let statusIcon = '';
+
+                if (status.includes('Up')) {
+                    statusClass = 'status-running';
+                    statusIcon = '<i class="fas fa-play-circle" style="color: #10b981; margin-right: 4px;"></i>';
+                } else if (status.includes('Exited')) {
+                    statusClass = 'status-exited';
+                    statusIcon = '<i class="fas fa-stop-circle" style="color: #ef4444; margin-right: 4px;"></i>';
+                } else {
+                    statusClass = 'status-stopped';
+                    statusIcon = '<i class="fas fa-pause-circle" style="color: #f59e0b; margin-right: 4px;"></i>';
+                }
+
+                const row = document.createElement('tr');
+                row.style.cursor = 'pointer';
+                row.title = `Click to manage container ${containerId} (${names})`;
+
+                // Use full container ID for actions, not just the truncated version
+                row.addEventListener('click', () => this.showContainerActions(containerId));
+
+                row.innerHTML = `
+                    <td class="container-id" title="Full ID: ${this.escapeHtml(containerId)}">${this.escapeHtml(containerId.substring(0, 12))}</td>
+                    <td class="image-name">${this.escapeHtml(image)}</td>
+                    <td>${this.escapeHtml(command)}</td>
+                    <td>${this.escapeHtml(created)}</td>
+                    <td class="${statusClass}">${statusIcon}${this.escapeHtml(status)}</td>
+                    <td>${this.escapeHtml(ports)}</td>
+                    <td>${this.escapeHtml(names)}</td>
+                `;
+                tbody.appendChild(row);
+            }
+        }
+
+        table.style.display = 'table';
+        message.style.display = 'none';
+    }
+
+    async refreshDockerNetworks() {
+        const machineId = document.getElementById('docker-machine-select').value;
+        if (!machineId) return;
+
+        try {
+            this.showLoading();
+            const response = await fetch('/api/docker/networks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ machine_id: machineId })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.populateNetworksTable(result.output);
+
+                // Update networks count in quick stats
+                const lines = result.output.split('\n').filter(line => line.trim() && !line.startsWith('NETWORK'));
+                document.getElementById('docker-networks-count').textContent = lines.length;
+            } else {
+                this.showDockerMessage('docker-networks', `Error: ${result.error}`);
+            }
+        } catch (error) {
+            this.showDockerMessage('docker-networks', `Error: ${error.message}`);
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    populateNetworksTable(output) {
+        const table = document.getElementById('docker-networks-table');
+        const tbody = document.getElementById('docker-networks-tbody');
+        const message = document.getElementById('docker-networks-message');
+
+        if (!output || output.trim() === '') {
+            table.style.display = 'none';
+            message.style.display = 'block';
+            message.textContent = 'No networks found';
+            return;
+        }
+
+        const lines = output.split('\n').filter(line => line.trim());
+        if (lines.length <= 1) {
+            table.style.display = 'none';
+            message.style.display = 'block';
+            message.textContent = 'No networks found';
+            return;
+        }
+
+        // Clear existing rows
+        tbody.innerHTML = '';
+
+        // Parse data (skip header)
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+
+            const parts = line.split(/\s+/);
+            if (parts.length >= 4) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="container-id">${this.escapeHtml(parts[0].substring(0, 12))}</td>
+                    <td>${this.escapeHtml(parts[1])}</td>
+                    <td>${this.escapeHtml(parts[2])}</td>
+                    <td>${this.escapeHtml(parts[3])}</td>
+                `;
+                tbody.appendChild(row);
+            }
+        }
+
+        table.style.display = 'table';
+        message.style.display = 'none';
+    }
+
+    async refreshDockerVolumes() {
+        const machineId = document.getElementById('docker-machine-select').value;
+        if (!machineId) return;
+
+        try {
+            this.showLoading();
+            const response = await fetch('/api/docker/volumes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ machine_id: machineId })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.populateVolumesTable(result.output);
+
+                // Update volumes count in quick stats
+                const lines = result.output.split('\n').filter(line => line.trim() && !line.startsWith('DRIVER'));
+                document.getElementById('docker-volumes-count').textContent = lines.length;
+            } else {
+                this.showDockerMessage('docker-volumes', `Error: ${result.error}`);
+            }
+        } catch (error) {
+            this.showDockerMessage('docker-volumes', `Error: ${error.message}`);
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    populateVolumesTable(output) {
+        const table = document.getElementById('docker-volumes-table');
+        const tbody = document.getElementById('docker-volumes-tbody');
+        const message = document.getElementById('docker-volumes-message');
+
+        if (!output || output.trim() === '') {
+            table.style.display = 'none';
+            message.style.display = 'block';
+            message.textContent = 'No volumes found';
+            return;
+        }
+
+        const lines = output.split('\n').filter(line => line.trim());
+        if (lines.length <= 1) {
+            table.style.display = 'none';
+            message.style.display = 'block';
+            message.textContent = 'No volumes found';
+            return;
+        }
+
+        // Clear existing rows
+        tbody.innerHTML = '';
+
+        // Parse data (skip header)
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+
+            const parts = line.split(/\s+/);
+            if (parts.length >= 2) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${this.escapeHtml(parts[0])}</td>
+                    <td>${this.escapeHtml(parts[1])}</td>
+                `;
+                tbody.appendChild(row);
+            }
+        }
+
+        table.style.display = 'table';
+        message.style.display = 'none';
+    }
+
+    showDockerMessage(section, text) {
+        const table = document.getElementById(`${section}-table`);
+        const message = document.getElementById(`${section}-message`);
+
+        if (table) table.style.display = 'none';
+        if (message) {
+            message.style.display = 'block';
+            message.textContent = text;
+        }
+    }
+
+    async debugContainer() {
+        const containerId = document.getElementById('selected-container-id').value;
+        const machineId = document.getElementById('docker-machine-select').value;
+
+        if (!containerId || !machineId) {
+            this.addLog('Container ID and machine must be selected', 'error');
+            return;
+        }
+
+        try {
+            this.showLoading();
+            this.addLog(`🔍 Debugging identifier: ${containerId}`, 'info');
+
+            const response = await fetch('/api/docker/debug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    identifier: containerId
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                const debug = result.debug_info;
+
+                this.addLog(`🔍 Debug Results for: ${debug.identifier}`, 'info');
+                this.addLog(`📦 Is Container: ${debug.is_container ? '✅ YES' : '❌ NO'}`, 'info');
+                this.addLog(`🖼️ Is Image: ${debug.is_image ? '✅ YES' : '❌ NO'}`, 'info');
+
+                if (debug.is_container) {
+                    this.addLog(`📊 Container Status: ${debug.container_status}`, 'info');
+                    this.addLog(`🏷️ Container Name: ${debug.container_name}`, 'info');
+                }
+
+                if (debug.is_image && debug.containers_from_image.length > 0) {
+                    this.addLog(`📋 Containers from this image:`, 'info');
+                    debug.containers_from_image.forEach(container => {
+                        this.addLog(`   └─ ${container.id} (${container.name}) - ${container.status}`, 'info');
+                    });
+                }
+
+                if (debug.recommendations.length > 0) {
+                    this.addLog(`💡 Recommendations:`, 'info');
+                    debug.recommendations.forEach(rec => {
+                        this.addLog(`   └─ ${rec}`, 'info');
+                    });
+                }
+
+                // Additional troubleshooting
+                if (!debug.is_container && !debug.is_image) {
+                    this.addLog(`❌ "${debug.identifier}" is neither a valid container nor image ID`, 'error');
+                    this.addLog(`💡 Try using 'docker ps -a' to find correct container IDs`, 'info');
+                    this.addLog(`💡 Try using 'docker images' to find correct image IDs`, 'info');
+                }
+
+            } else {
+                this.addLog(`❌ Debug failed: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            this.addLog(`❌ Debug error: ${error.message}`, 'error');
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    updateContainerFilterLabel() {
+        const checkbox = document.getElementById('show-all-containers');
+        const label = document.getElementById('container-filter-label');
+        const description = document.getElementById('container-filter-description');
+
+        if (checkbox && label && description) {
+            if (checkbox.checked) {
+                label.textContent = 'Showing All Containers';
+                description.textContent = '(Running & Stopped)';
+            } else {
+                label.textContent = 'Showing Running Containers';
+                description.textContent = '(Running Only)';
+            }
+        }
+    } handleContainerClick(event, output) {
+        const clickX = event.offsetX;
+        const clickY = event.offsetY;
+
+        // Calculate which line was clicked
+        const lineHeight = 16; // Approximate line height in pixels
+        const lineIndex = Math.floor(clickY / lineHeight);
+
+        const lines = output.split('\n');
+        if (lineIndex > 0 && lineIndex < lines.length) {
+            const clickedLine = lines[lineIndex];
+
+            // Extract container ID (first column)
+            const containerMatch = clickedLine.match(/^([a-f0-9]{12})/);
+            if (containerMatch) {
+                const containerId = containerMatch[1];
+                this.showContainerActions(containerId);
+            }
+        }
+    }
+
+    showContainerActions(containerId) {
+        // Validate container ID format and provide helpful feedback
+        if (!containerId || containerId.length < 12) {
+            this.addLog('⚠️ Invalid container ID. Please select a valid container from the list.', 'warning');
+            return;
+        }
+
+        // Check if this looks like an image ID vs container ID
+        if (containerId.length === 12 && /^[a-f0-9]+$/.test(containerId)) {
+            this.addLog(`ℹ️ Note: "${containerId}" appears to be an image ID. For container actions, make sure you select an existing container, not an image.`, 'info');
+        }
+
+        document.getElementById('selected-container-id').value = containerId;
+        document.getElementById('container-actions-panel').style.display = 'block';
+
+        // Scroll to actions panel
+        document.getElementById('container-actions-panel').scrollIntoView({
+            behavior: 'smooth',
+            block: 'nearest'
+        });
+
+        this.addLog(`Selected container for actions: ${containerId}`, 'info');
+    }
+
+    async containerAction(action) {
+        const containerId = document.getElementById('selected-container-id').value;
+        const machineId = document.getElementById('docker-machine-select').value;
+
+        if (!containerId || !machineId) {
+            this.addLog('Container ID and machine must be selected', 'error');
+            return;
+        }
+
+        try {
+            this.showLoading();
+            this.addLog(`Starting ${action} action on container: ${containerId}`, 'info');
+
+            const response = await fetch('/api/docker/container/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    container_id: containerId,
+                    action: action,
+                    force: action === 'remove', // Force remove containers
+                    detached: action === 'start' // Run in detached mode for start action
+                })
+            });
+
+            const result = await response.json();
+
+            // Enhanced logging for debugging
+            this.addLog(`Container ${action} response: ${JSON.stringify(result)}`, 'info');
+
+            if (result.success) {
+                if (action === 'start') {
+                    this.addLog(`✅ Container started successfully: ${containerId}`, 'success');
+                    if (result.output) {
+                        this.addLog(`Output: ${result.output}`, 'info');
+                    }
+                } else {
+                    this.addLog(`✅ Container ${action} successful: ${containerId}`, 'success');
+                }
+
+                // Refresh containers list to show updated status
+                setTimeout(() => {
+                    this.refreshDockerContainers();
+                }, 1000); // Small delay to allow container state to update
+
+                // Hide actions panel for remove action
+                if (action === 'remove') {
+                    document.getElementById('container-actions-panel').style.display = 'none';
+                }
+            } else {
+                const errorMsg = result.errors || result.error || 'Unknown error';
+                this.addLog(`❌ Container ${action} failed: ${errorMsg}`, 'error');
+
+                // Additional troubleshooting info
+                if (action === 'start') {
+                    this.addLog(`💡 Troubleshooting: Make sure the container ID "${containerId}" is correct and the container exists`, 'info');
+                }
+            }
+        } catch (error) {
+            this.addLog(`❌ Container ${action} error: ${error.message}`, 'error');
+            console.error('Container action error:', error);
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    async viewContainerLogs() {
+        const containerId = document.getElementById('selected-container-id').value;
+        const machineId = document.getElementById('docker-machine-select').value;
+
+        if (!containerId || !machineId) return;
+
+        try {
+            this.showLoading();
+            const response = await fetch('/api/docker/container/logs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    container_id: containerId,
+                    tail: 100
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                // Show logs in a modal or in the logs panel
+                this.displayOutput('logs-content', {
+                    success: true,
+                    output: `Container Logs (${containerId}):\n\n${result.output}`
+                });
+                this.autoOpenLogs();
+            } else {
+                this.addLog(`Failed to get container logs: ${result.errors || result.error}`, 'error');
+            }
+        } catch (error) {
+            this.addLog(`Error getting container logs: ${error.message}`, 'error');
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    async execContainerCommand() {
+        const containerId = document.getElementById('selected-container-id').value;
+        const command = prompt('Enter command to execute:');
+
+        if (!command) return;
+
+        const machineId = document.getElementById('docker-machine-select').value;
+
+        try {
+            this.showLoading();
+            const response = await fetch('/api/docker/exec', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    container_id: containerId,
+                    command: command,
+                    interactive: false
+                })
+            });
+
+            const result = await response.json();
+
+            this.displayOutput('logs-content', {
+                success: result.success,
+                output: `Executed in ${containerId}: ${command}\n\n${result.output}`,
+                error: result.errors
+            });
+            this.autoOpenLogs();
+        } catch (error) {
+            this.addLog(`Error executing command: ${error.message}`, 'error');
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    async inspectContainer() {
+        const containerId = document.getElementById('selected-container-id').value;
+        const machineId = document.getElementById('docker-machine-select').value;
+
+        if (!containerId || !machineId) return;
+
+        try {
+            this.showLoading();
+            const response = await fetch('/api/docker/container/inspect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    container_id: containerId
+                })
+            });
+
+            const result = await response.json();
+
+            this.displayOutput('logs-content', {
+                success: result.success,
+                output: `Container Inspection (${containerId}):\n\n${result.output}`,
+                error: result.errors
+            });
+            this.autoOpenLogs();
+        } catch (error) {
+            this.addLog(`Error inspecting container: ${error.message}`, 'error');
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    showPullImageDialog() {
+        const imageName = prompt('Enter image name to pull (e.g., nginx:latest):');
+        if (imageName) {
+            document.getElementById('pull-image-name').value = imageName;
+            this.switchDockerTab('actions-docker');
+        }
+    }
+
+    showRunContainerDialog() {
+        this.switchDockerTab('actions-docker');
+        document.getElementById('run-image-name').focus();
+    }
+
+    async executePullImage() {
+        const imageName = document.getElementById('pull-image-name').value.trim();
+        const machineId = document.getElementById('docker-machine-select').value;
+
+        if (!imageName || !machineId) {
+            this.addLog('Please enter an image name and select a machine', 'error');
+            return;
+        }
+
+        try {
+            this.startExecution('docker_pull');
+            this.showLoading();
+
+            const response = await fetch('/api/docker/pull', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    image_name: imageName
+                })
+            });
+
+            const result = await response.json();
+
+            this.displayOutput('logs-content', {
+                success: result.success,
+                output: result.output,
+                error: result.errors
+            });
+
+            if (result.success) {
+                this.addLog(`Successfully pulled image: ${imageName}`, 'success');
+                // Refresh images list if on images tab
+                if (document.querySelector('[data-tab="images-docker"]').classList.contains('active')) {
+                    this.refreshDockerImages();
+                } else {
+                    // Always refresh images to update the run container dropdown
+                    this.refreshDockerImages();
+                }
+
+                // Clear the pull image input
+                document.getElementById('pull-image-name').value = '';
+            } else {
+                this.addLog(`Failed to pull image: ${result.errors || result.error}`, 'error');
+            }
+        } catch (error) {
+            this.addLog(`Error pulling image: ${error.message}`, 'error');
+        } finally {
+            this.endExecution(true);
+            this.hideLoading();
+        }
+    }
+
+    async executeRunContainer() {
+        const imageName = document.getElementById('run-image-name').value.trim();
+        const containerName = document.getElementById('run-container-name').value.trim();
+        const machineId = document.getElementById('docker-machine-select').value;
+
+        if (!imageName || !machineId) {
+            this.addLog('Please enter an image name and select a machine', 'error');
+            return;
+        }
+
+        // Parse port mappings
+        const portMappings = document.getElementById('run-port-mappings').value
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line);
+
+        // Parse volume mappings
+        const volumeMappings = document.getElementById('run-volume-mappings').value
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line);
+
+        // Parse environment variables
+        const envVars = document.getElementById('run-env-vars').value
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line);
+
+        const additionalArgs = document.getElementById('run-additional-args').value.trim();
+        const detached = document.getElementById('run-detached').checked;
+
+        try {
+            this.startExecution('docker_run');
+            this.showLoading();
+
+            const response = await fetch('/api/docker/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    image_name: imageName,
+                    container_name: containerName || undefined,
+                    ports: portMappings,
+                    volumes: volumeMappings,
+                    env_vars: envVars,
+                    additional_args: additionalArgs,
+                    detach: detached
+                })
+            });
+
+            const result = await response.json();
+
+            this.displayOutput('logs-content', {
+                success: result.success,
+                output: `${result.command}\n\n${result.output}`,
+                error: result.errors
+            });
+
+            if (result.success) {
+                this.addLog(`Successfully started container: ${containerName || imageName}`, 'success');
+                // Refresh containers list if on containers tab
+                if (document.querySelector('[data-tab="containers-docker"]').classList.contains('active')) {
+                    this.refreshDockerContainers();
+                } else {
+                    // Always refresh containers to update the exec container dropdown
+                    this.refreshDockerContainers();
+                }
+
+                // Clear form
+                document.getElementById('run-container-name').value = '';
+                document.getElementById('run-port-mappings').value = '';
+                document.getElementById('run-volume-mappings').value = '';
+                document.getElementById('run-env-vars').value = '';
+                document.getElementById('run-additional-args').value = '';
+            } else {
+                this.addLog(`Failed to run container: ${result.errors || result.error}`, 'error');
+            }
+        } catch (error) {
+            this.addLog(`Error running container: ${error.message}`, 'error');
+        } finally {
+            this.endExecution(true);
+            this.hideLoading();
+        }
+    }
+
+    async executeContainerCommand() {
+        const containerId = document.getElementById('exec-container-id').value.trim();
+        const command = document.getElementById('exec-command').value.trim();
+        const interactive = document.getElementById('exec-interactive').checked;
+        const machineId = document.getElementById('docker-machine-select').value;
+
+        if (!containerId || !command || !machineId) {
+            this.addLog('Please enter container ID, command, and select a machine', 'error');
+            return;
+        }
+
+        try {
+            this.startExecution('docker_exec');
+            this.showLoading();
+
+            const response = await fetch('/api/docker/exec', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    container_id: containerId,
+                    command: command,
+                    interactive: interactive
+                })
+            });
+
+            const result = await response.json();
+
+            this.displayOutput('logs-content', {
+                success: result.success,
+                output: `${result.command}\n\n${result.output}`,
+                error: result.errors
+            });
+
+            if (result.success) {
+                this.addLog(`Command executed successfully in container: ${containerId}`, 'success');
+
+                // Clear form
+                document.getElementById('exec-command').value = '';
+            } else {
+                this.addLog(`Failed to execute command: ${result.errors || result.error}`, 'error');
+            }
+        } catch (error) {
+            this.addLog(`Error executing command: ${error.message}`, 'error');
+        } finally {
+            this.endExecution(true);
+            this.hideLoading();
+        }
+    }
+
+    populateContainerIds(containerLines) {
+        // Extract container IDs and names from the output
+        const containers = [];
+        containerLines.forEach(line => {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length >= 7) {
+                const containerId = parts[0];
+                const containerName = parts[parts.length - 1];
+                if (containerId && containerId !== 'CONTAINER') {
+                    containers.push({
+                        id: containerId,
+                        name: containerName,
+                        display: `${containerId.substring(0, 12)} (${containerName})`
+                    });
+                }
+            }
+        });
+
+        // Populate the exec container dropdown
+        const execContainerSelect = document.getElementById('exec-container-id');
+        if (execContainerSelect) {
+            // Clear existing options except the first one
+            execContainerSelect.innerHTML = '<option value="">Select a container...</option>';
+
+            // Add container options
+            containers.forEach(container => {
+                const option = document.createElement('option');
+                option.value = container.id;
+                option.textContent = container.display;
+                execContainerSelect.appendChild(option);
+            });
+        }
+
+        // Populate the stats container dropdown
+        const statsContainerSelect = document.getElementById('stats-container-id');
+        if (statsContainerSelect) {
+            // Clear existing options except the first one
+            statsContainerSelect.innerHTML = '<option value="">Select a container...</option>';
+
+            // Add container options
+            containers.forEach(container => {
+                const option = document.createElement('option');
+                option.value = container.id;
+                option.textContent = container.display;
+                statsContainerSelect.appendChild(option);
+            });
+        }
+
+        // Create datalist for other container ID inputs (for backward compatibility)
+        const existingDatalist = document.getElementById('container-ids-datalist');
+        if (existingDatalist) {
+            existingDatalist.remove();
+        }
+
+        if (containers.length > 0) {
+            const datalist = document.createElement('datalist');
+            datalist.id = 'container-ids-datalist';
+
+            containers.forEach(container => {
+                const option = document.createElement('option');
+                option.value = container.id;
+                option.textContent = container.display;
+                datalist.appendChild(option);
+            });
+
+            document.body.appendChild(datalist);
+
+            // Add datalist to other container ID inputs (only text inputs)
+            const containerIdInputs = [
+                'selected-container-id'
+            ];
+
+            containerIdInputs.forEach(inputId => {
+                const input = document.getElementById(inputId);
+                if (input) {
+                    input.setAttribute('list', 'container-ids-datalist');
+                    input.setAttribute('placeholder', 'Select or type container ID/name...');
+                }
+            });
+        }
+    }
+
+    async executeContainerStats() {
+        const containerId = document.getElementById('stats-container-id').value.trim();
+        const machineId = document.getElementById('docker-machine-select').value;
+
+        if (!containerId || !machineId) {
+            this.addLog('Please enter container ID and select a machine', 'error');
+            return;
+        }
+
+        try {
+            this.startExecution('docker_stats');
+            this.showLoading();
+
+            const response = await fetch('/api/docker/stats', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    container_id: containerId
+                })
+            });
+
+            const result = await response.json();
+
+            this.displayOutput('logs-content', {
+                success: result.success,
+                output: `Container Statistics for ${containerId}:\n\n${result.output}`,
+                error: result.errors
+            });
+
+            if (result.success) {
+                this.addLog(`Retrieved statistics for container: ${containerId}`, 'success');
+            } else {
+                this.addLog(`Failed to get stats: ${result.errors || result.error}`, 'error');
+            }
+        } catch (error) {
+            this.addLog(`Error getting container stats: ${error.message}`, 'error');
+        } finally {
+            this.endExecution(true);
+            this.hideLoading();
+        }
+    }
+
+    async executeDockerCompose() {
+        const composeContent = document.getElementById('compose-content').value.trim();
+        const composeFile = document.getElementById('compose-filename').value.trim() || 'docker-compose.yml';
+        const detached = document.getElementById('compose-detached').checked;
+        const build = document.getElementById('compose-build').checked;
+        const machineId = document.getElementById('docker-machine-select').value;
+
+        if (!composeContent || !machineId) {
+            this.addLog('Please enter compose file content and select a machine', 'error');
+            return;
+        }
+
+        try {
+            this.startExecution('docker_compose');
+            this.showLoading();
+
+            const response = await fetch('/api/docker/compose/up', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    compose_content: composeContent,
+                    compose_file: composeFile,
+                    detach: detached,
+                    build: build
+                })
+            });
+
+            const result = await response.json();
+
+            this.displayOutput('logs-content', {
+                success: result.success,
+                output: `Docker Compose Up Result:\n\n${result.output}`,
+                error: result.errors
+            });
+
+            if (result.success) {
+                this.addLog('Docker compose executed successfully', 'success');
+                // Refresh containers list to show new containers
+                this.refreshDockerContainers();
+
+                // Clear the compose content
+                document.getElementById('compose-content').value = '';
+            } else {
+                this.addLog(`Failed to run docker compose: ${result.errors || result.error}`, 'error');
+            }
+        } catch (error) {
+            this.addLog(`Error running docker compose: ${error.message}`, 'error');
+        } finally {
+            this.endExecution(true);
+            this.hideLoading();
+        }
+    }
+
+    async executeSystemPrune() {
+        const allUnused = document.getElementById('prune-all').checked;
+        const volumes = document.getElementById('prune-volumes').checked;
+        const containers = document.getElementById('prune-containers').checked;
+        const machineId = document.getElementById('docker-machine-select').value;
+
+        if (!machineId) {
+            this.addLog('Please select a machine', 'error');
+            return;
+        }
+
+        // Confirmation dialog
+        let confirmMessage = `Are you sure you want to clean Docker system? This will remove:\n`;
+        if (containers) {
+            confirmMessage += `- All stopped/exited containers\n`;
+        }
+        confirmMessage += `- All networks not used by at least one container\n` +
+            `- All dangling images${allUnused ? '\n- All unused images' : ''}\n` +
+            `- All build cache${volumes ? '\n- All unused volumes' : ''}\n\n` +
+            `This action cannot be undone!`;
+
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+
+        try {
+            this.startExecution('docker_prune');
+            this.showLoading();
+
+            const response = await fetch('/api/docker/system/prune', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    all: allUnused,
+                    volumes: volumes,
+                    containers: containers
+                })
+            });
+
+            const result = await response.json();
+
+            this.displayOutput('logs-content', {
+                success: result.success,
+                output: `Docker System Cleanup Result:\n\n${result.output}`,
+                error: result.errors
+            });
+
+            if (result.success) {
+                this.addLog('Docker system cleanup completed successfully', 'success');
+                // Refresh all Docker info to show updated stats
+                this.refreshDockerInfo();
+                this.refreshDockerImages();
+                this.refreshDockerContainers();
+                this.refreshDockerVolumes();
+                this.refreshDockerNetworks();
+            } else {
+                this.addLog(`Failed to clean system: ${result.errors || result.error}`, 'error');
+            }
+        } catch (error) {
+            this.addLog(`Error cleaning Docker system: ${error.message}`, 'error');
+        } finally {
+            this.endExecution(true);
+            this.hideLoading();
+        }
     }
 }
 

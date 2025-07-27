@@ -1761,6 +1761,1136 @@ This directory contains {script_type} files and configurations.
                 data["machine_name"] = ""
             return jsonify(data)
 
+        # === DOCKER API ENDPOINTS ===
+        
+        @app.route("/api/docker/info", methods=["POST"])
+        def docker_info():
+            """Get Docker system information for a machine."""
+            data = request.json
+            machine_id = data.get("machine_id")
+            
+            if machine_id == "localhost":
+                # Local Docker info
+                try:
+                    import subprocess
+                    version_result = subprocess.run(["docker", "--version"], capture_output=True, text=True, timeout=30)
+                    info_result = subprocess.run(["docker", "info", "--format", "json"], capture_output=True, text=True, timeout=30)
+                    
+                    if version_result.returncode != 0:
+                        return jsonify({"success": False, "error": "Docker is not installed on localhost"})
+                    
+                    return jsonify({
+                        "success": True,
+                        "version": version_result.stdout.strip(),
+                        "info": info_result.stdout.strip() if info_result.returncode == 0 else "",
+                        "errors": info_result.stderr if info_result.returncode != 0 else ""
+                    })
+                except Exception as e:
+                    return jsonify({"success": False, "error": str(e)})
+            
+            # Remote Docker info
+            machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+            if not machine:
+                return jsonify({"success": False, "error": "Machine not found"}), 404
+            
+            try:
+                client = SSHClient(
+                    machine["host"],
+                    machine["username"],
+                    machine.get("password"),
+                    machine.get("port", 22),
+                    machine.get("key"),
+                )
+                client.login()
+                result = client.docker_info()
+                client.close()
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/images", methods=["POST"])
+        def docker_list_images():
+            """List Docker images for a machine."""
+            data = request.json
+            machine_id = data.get("machine_id")
+            
+            if machine_id == "localhost":
+                # Local Docker images
+                try:
+                    import subprocess
+                    result = subprocess.run([
+                        "docker", "images", "--format", 
+                        "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedAt}}\t{{.Size}}"
+                    ], capture_output=True, text=True, timeout=30)
+                    
+                    if result.returncode != 0:
+                        return jsonify({"success": False, "error": "Failed to list Docker images"})
+                    
+                    return jsonify({
+                        "success": True,
+                        "output": result.stdout.strip(),
+                        "errors": result.stderr
+                    })
+                except Exception as e:
+                    return jsonify({"success": False, "error": str(e)})
+            
+            # Remote Docker images
+            machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+            if not machine:
+                return jsonify({"success": False, "error": "Machine not found"}), 404
+            
+            try:
+                client = SSHClient(
+                    machine["host"],
+                    machine["username"],
+                    machine.get("password"),
+                    machine.get("port", 22),
+                    machine.get("key"),
+                )
+                client.login()
+                result = client.docker_list_images()
+                client.close()
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/containers", methods=["POST"])
+        def docker_list_containers():
+            """List Docker containers for a machine."""
+            data = request.json
+            machine_id = data.get("machine_id")
+            all_containers = data.get("all", True)
+            
+            if machine_id == "localhost":
+                # Local Docker containers
+                try:
+                    import subprocess
+                    flag = "-a" if all_containers else ""
+                    cmd = ["docker", "ps"] + (["-a"] if all_containers else []) + [
+                        "--format", "table {{.ID}}\t{{.Image}}\t{{.Command}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}"
+                    ]
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                    
+                    if result.returncode != 0:
+                        return jsonify({"success": False, "error": "Failed to list Docker containers"})
+                    
+                    return jsonify({
+                        "success": True,
+                        "output": result.stdout.strip(),
+                        "errors": result.stderr
+                    })
+                except Exception as e:
+                    return jsonify({"success": False, "error": str(e)})
+            
+            # Remote Docker containers
+            machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+            if not machine:
+                return jsonify({"success": False, "error": "Machine not found"}), 404
+            
+            try:
+                client = SSHClient(
+                    machine["host"],
+                    machine["username"],
+                    machine.get("password"),
+                    machine.get("port", 22),
+                    machine.get("key"),
+                )
+                client.login()
+                result = client.docker_list_containers(all_containers)
+                client.close()
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/networks", methods=["POST"])
+        def docker_list_networks():
+            """List Docker networks for a machine."""
+            data = request.json
+            machine_id = data.get("machine_id")
+            
+            if machine_id == "localhost":
+                # Local Docker networks
+                try:
+                    import subprocess
+                    result = subprocess.run([
+                        "docker", "network", "ls", "--format", 
+                        "table {{.ID}}\t{{.Name}}\t{{.Driver}}\t{{.Scope}}"
+                    ], capture_output=True, text=True, timeout=30)
+                    
+                    if result.returncode != 0:
+                        return jsonify({"success": False, "error": "Failed to list Docker networks"})
+                    
+                    return jsonify({
+                        "success": True,
+                        "output": result.stdout.strip(),
+                        "errors": result.stderr
+                    })
+                except Exception as e:
+                    return jsonify({"success": False, "error": str(e)})
+            
+            # Remote Docker networks
+            machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+            if not machine:
+                return jsonify({"success": False, "error": "Machine not found"}), 404
+            
+            try:
+                client = SSHClient(
+                    machine["host"],
+                    machine["username"],
+                    machine.get("password"),
+                    machine.get("port", 22),
+                    machine.get("key"),
+                )
+                client.login()
+                result = client.docker_list_networks()
+                client.close()
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/volumes", methods=["POST"])
+        def docker_list_volumes():
+            """List Docker volumes for a machine."""
+            data = request.json
+            machine_id = data.get("machine_id")
+            
+            if machine_id == "localhost":
+                # Local Docker volumes
+                try:
+                    import subprocess
+                    result = subprocess.run([
+                        "docker", "volume", "ls", "--format", 
+                        "table {{.Driver}}\t{{.Name}}"
+                    ], capture_output=True, text=True, timeout=30)
+                    
+                    if result.returncode != 0:
+                        return jsonify({"success": False, "error": "Failed to list Docker volumes"})
+                    
+                    return jsonify({
+                        "success": True,
+                        "output": result.stdout.strip(),
+                        "errors": result.stderr
+                    })
+                except Exception as e:
+                    return jsonify({"success": False, "error": str(e)})
+            
+            # Remote Docker volumes
+            machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+            if not machine:
+                return jsonify({"success": False, "error": "Machine not found"}), 404
+            
+            try:
+                client = SSHClient(
+                    machine["host"],
+                    machine["username"],
+                    machine.get("password"),
+                    machine.get("port", 22),
+                    machine.get("key"),
+                )
+                client.login()
+                result = client.docker_list_volumes()
+                client.close()
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/container/logs", methods=["POST"])
+        def docker_container_logs():
+            """Get Docker container logs."""
+            data = request.json
+            machine_id = data.get("machine_id")
+            container_id = data.get("container_id")
+            tail = data.get("tail", 50)
+            
+            if not container_id:
+                return jsonify({"success": False, "error": "Container ID is required"}), 400
+            
+            if machine_id == "localhost":
+                # Local Docker logs
+                try:
+                    import subprocess
+                    result = subprocess.run([
+                        "docker", "logs", "--tail", str(tail), container_id
+                    ], capture_output=True, text=True, timeout=30)
+                    
+                    return jsonify({
+                        "success": True,
+                        "output": result.stdout.strip(),
+                        "errors": result.stderr
+                    })
+                except Exception as e:
+                    return jsonify({"success": False, "error": str(e)})
+            
+            # Remote Docker logs
+            machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+            if not machine:
+                return jsonify({"success": False, "error": "Machine not found"}), 404
+            
+            try:
+                client = SSHClient(
+                    machine["host"],
+                    machine["username"],
+                    machine.get("password"),
+                    machine.get("port", 22),
+                    machine.get("key"),
+                )
+                client.login()
+                result = client.docker_container_logs(container_id, tail)
+                client.close()
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/container/inspect", methods=["POST"])
+        def docker_inspect_container():
+            """Inspect a Docker container."""
+            data = request.json
+            machine_id = data.get("machine_id")
+            container_id = data.get("container_id")
+            
+            if not container_id:
+                return jsonify({"success": False, "error": "Container ID is required"}), 400
+            
+            if machine_id == "localhost":
+                # Local Docker inspect
+                try:
+                    import subprocess
+                    result = subprocess.run([
+                        "docker", "inspect", container_id
+                    ], capture_output=True, text=True, timeout=30)
+                    
+                    return jsonify({
+                        "success": result.returncode == 0,
+                        "output": result.stdout.strip(),
+                        "errors": result.stderr
+                    })
+                except Exception as e:
+                    return jsonify({"success": False, "error": str(e)})
+            
+            # Remote Docker inspect
+            machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+            if not machine:
+                return jsonify({"success": False, "error": "Machine not found"}), 404
+            
+            try:
+                client = SSHClient(
+                    machine["host"],
+                    machine["username"],
+                    machine.get("password"),
+                    machine.get("port", 22),
+                    machine.get("key"),
+                )
+                client.login()
+                result = client.docker_inspect_container(container_id)
+                client.close()
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/pull", methods=["POST"])
+        def docker_pull_image():
+            """Pull a Docker image."""
+            import datetime, time
+            data = request.json
+            machine_id = data.get("machine_id")
+            image_name = data.get("image_name")
+            
+            if not image_name:
+                return jsonify({"success": False, "error": "Image name is required"}), 400
+            
+            started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                if machine_id == "localhost":
+                    # Local Docker pull
+                    import subprocess
+                    t0 = time.time()
+                    result = subprocess.run([
+                        "docker", "pull", image_name
+                    ], capture_output=True, text=True, timeout=600)
+                    t1 = time.time()
+                    
+                    success = result.returncode == 0
+                    output = result.stdout.strip()
+                    errors = result.stderr
+                else:
+                    # Remote Docker pull
+                    machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+                    if not machine:
+                        return jsonify({"success": False, "error": "Machine not found"}), 404
+                    
+                    client = SSHClient(
+                        machine["host"],
+                        machine["username"],
+                        machine.get("password"),
+                        machine.get("port", 22),
+                        machine.get("key"),
+                    )
+                    client.login()
+                    t0 = time.time()
+                    result = client.docker_pull_image(image_name)
+                    t1 = time.time()
+                    client.close()
+                    
+                    success = result.get("success", False)
+                    output = result.get("output", "")
+                    errors = result.get("errors", "")
+                
+                # Log execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": "docker_pull",
+                    "status": "success" if success else "failed",
+                    "command": f"docker pull {image_name}",
+                    "output": output,
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": t1 - t0,
+                    "logs": errors or "",
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({
+                    "success": success,
+                    "output": output,
+                    "errors": errors
+                })
+                
+            except Exception as e:
+                # Log failed execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": "docker_pull",
+                    "status": "failed",
+                    "command": f"docker pull {image_name}",
+                    "output": "",
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": 0,
+                    "logs": str(e),
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/run", methods=["POST"])
+        def docker_run_container():
+            """Run a Docker container."""
+            import datetime, time
+            data = request.json
+            machine_id = data.get("machine_id")
+            image_name = data.get("image_name")
+            container_name = data.get("container_name")
+            ports = data.get("ports", [])  # ["8080:80", "3000:3000"]
+            volumes = data.get("volumes", [])  # ["/host/path:/container/path"]
+            env_vars = data.get("env_vars", [])  # ["VAR=value"]
+            detach = data.get("detach", True)
+            additional_args = data.get("additional_args", "")
+            
+            if not image_name:
+                return jsonify({"success": False, "error": "Image name is required"}), 400
+            
+            started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                if machine_id == "localhost":
+                    # Local Docker run
+                    import subprocess
+                    cmd = ["docker", "run"]
+
+                    cmd.append("-it")  # Interactive terminal
+                    
+                    if detach:
+                        cmd.append("-d")
+                    
+                    if container_name:
+                        cmd.extend(["--name", container_name])
+                    
+                    for port_mapping in ports:
+                        cmd.extend(["-p", port_mapping])
+                    
+                    for volume_mapping in volumes:
+                        cmd.extend(["-v", volume_mapping])
+                    
+                    for env_var in env_vars:
+                        cmd.extend(["-e", env_var])
+                    
+                    if additional_args:
+                        cmd.extend(additional_args.split())
+                    
+                    cmd.append(image_name)
+
+                    print("Running command:", " ".join(cmd))
+                    
+                    t0 = time.time()
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                    t1 = time.time()
+                    
+                    success = result.returncode == 0
+                    output = result.stdout.strip()
+                    errors = result.stderr
+                    command = " ".join(cmd)
+                else:
+                    # Remote Docker run
+                    machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+                    if not machine:
+                        return jsonify({"success": False, "error": "Machine not found"}), 404
+                    
+                    client = SSHClient(
+                        machine["host"],
+                        machine["username"],
+                        machine.get("password"),
+                        machine.get("port", 22),
+                        machine.get("key"),
+                    )
+                    client.login()
+                    t0 = time.time()
+                    result = client.docker_run_container(
+                        image_name, container_name, ports, volumes, env_vars, detach, additional_args
+                    )
+                    t1 = time.time()
+                    client.close()
+                    
+                    success = result.get("success", False)
+                    output = result.get("output", "")
+                    errors = result.get("errors", "")
+                    command = result.get("command", "")
+                
+                # Log execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": "docker_run",
+                    "status": "success" if success else "failed",
+                    "command": command,
+                    "output": output,
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": t1 - t0,
+                    "logs": errors or "",
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({
+                    "success": success,
+                    "output": output,
+                    "errors": errors,
+                    "command": command
+                })
+                
+            except Exception as e:
+                # Log failed execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": "docker_run",
+                    "status": "failed",
+                    "command": f"docker run {image_name}",
+                    "output": "",
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": 0,
+                    "logs": str(e),
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/debug", methods=["POST"])
+        def docker_debug():
+            """Debug Docker container/image identification and operations."""
+            data = request.json
+            machine_id = data.get("machine_id")
+            identifier = data.get("identifier")  # Could be container ID or image ID
+            
+            if not identifier:
+                return jsonify({"success": False, "error": "Identifier is required"}), 400
+            
+            try:
+                debug_info = {
+                    "identifier": identifier,
+                    "is_container": False,
+                    "is_image": False,
+                    "containers_from_image": [],
+                    "container_status": None,
+                    "recommendations": []
+                }
+                
+                if machine_id == "localhost":
+                    import subprocess
+                    
+                    # Check if it's a container
+                    container_check = subprocess.run(
+                        ["docker", "ps", "-a", "--filter", f"id={identifier}", "--format", "{{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    
+                    if container_check.returncode == 0 and container_check.stdout.strip():
+                        debug_info["is_container"] = True
+                        lines = container_check.stdout.strip().split('\n')
+                        if lines:
+                            parts = lines[0].split('\t')
+                            debug_info["container_status"] = parts[2] if len(parts) > 2 else "Unknown"
+                            debug_info["container_name"] = parts[3] if len(parts) > 3 else "Unknown"
+                            
+                            if "Up" in debug_info["container_status"]:
+                                debug_info["recommendations"].append("Container is already running")
+                            elif "Exited" in debug_info["container_status"]:
+                                debug_info["recommendations"].append("Container can be started with 'docker start'")
+                    
+                    # Check if it's an image
+                    image_check = subprocess.run(
+                        ["docker", "images", "--filter", f"id={identifier}", "--format", "{{.ID}}\t{{.Repository}}\t{{.Tag}}"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    
+                    if image_check.returncode == 0 and image_check.stdout.strip():
+                        debug_info["is_image"] = True
+                        debug_info["recommendations"].append("This is an image ID. Use 'docker run' to create a new container")
+                        
+                        # Find containers created from this image
+                        containers_check = subprocess.run(
+                            ["docker", "ps", "-a", "--filter", f"ancestor={identifier}", "--format", "{{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}"],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        
+                        if containers_check.returncode == 0 and containers_check.stdout.strip():
+                            lines = containers_check.stdout.strip().split('\n')
+                            for line in lines:
+                                parts = line.split('\t')
+                                if len(parts) >= 4:
+                                    debug_info["containers_from_image"].append({
+                                        "id": parts[0],
+                                        "image": parts[1],
+                                        "status": parts[2],
+                                        "name": parts[3]
+                                    })
+                
+                return jsonify({"success": True, "debug_info": debug_info})
+                
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/container/action", methods=["POST"])
+        def docker_container_action():
+            """Perform actions on Docker containers (start, stop, restart, remove)."""
+            import datetime, time
+            data = request.json
+            machine_id = data.get("machine_id")
+            container_id = data.get("container_id")
+            action = data.get("action")  # start, stop, restart, remove
+            force = data.get("force", False)
+            
+            if not container_id or not action:
+                return jsonify({"success": False, "error": "Container ID and action are required"}), 400
+            
+            if action not in ["start", "stop", "restart", "remove"]:
+                return jsonify({"success": False, "error": "Invalid action"}), 400
+            
+            started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                if machine_id == "localhost":
+                    # Local Docker action
+                    import subprocess
+                    cmd = ["docker", action]
+                    if action == "remove":
+                        cmd = ["docker", "rm"]
+                        if force:
+                            cmd.append("-f")
+                    elif action == "start":
+                        # For start action, ensure we use the right command
+                        cmd = ["docker", "start"]
+                    cmd.append(container_id)
+                    
+                    t0 = time.time()
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                    t1 = time.time()
+                    
+                    # Docker start is successful if return code is 0 and we get output (container ID)
+                    success = result.returncode == 0
+                    output = result.stdout.strip()
+                    errors = result.stderr.strip()
+                    command = " ".join(cmd)
+                    
+                    # Additional validation for start command
+                    if action == "start" and success and not output:
+                        # Sometimes docker start succeeds but doesn't return container ID
+                        # Let's verify the container is actually running
+                        verify_result = subprocess.run(
+                            ["docker", "ps", "-q", "--filter", f"id={container_id}"], 
+                            capture_output=True, text=True, timeout=10
+                        )
+                        if verify_result.returncode == 0 and verify_result.stdout.strip():
+                            output = container_id  # Use the container ID as output
+                        else:
+                            success = False
+                            errors = f"Container start command succeeded but container is not running. {errors}"
+                else:
+                    # Remote Docker action
+                    machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+                    if not machine:
+                        return jsonify({"success": False, "error": "Machine not found"}), 404
+                    
+                    client = SSHClient(
+                        machine["host"],
+                        machine["username"],
+                        machine.get("password"),
+                        machine.get("port", 22),
+                        machine.get("key"),
+                    )
+                    client.login()
+                    t0 = time.time()
+                    
+                    if action == "start":
+                        result = client.docker_start_container(container_id)
+                    elif action == "stop":
+                        result = client.docker_stop_container(container_id)
+                    elif action == "restart":
+                        result = client.docker_restart_container(container_id)
+                    elif action == "remove":
+                        result = client.docker_remove_container(container_id, force)
+                    
+                    t1 = time.time()
+                    client.close()
+                    
+                    success = result.get("success", False)
+                    output = result.get("output", "")
+                    errors = result.get("errors", "")
+                    command = f"docker {action} {container_id}"
+                
+                # Log execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": f"docker_{action}",
+                    "status": "success" if success else "failed",
+                    "command": command,
+                    "output": output,
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": t1 - t0,
+                    "logs": errors or "",
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({
+                    "success": success,
+                    "output": output,
+                    "errors": errors
+                })
+                
+            except Exception as e:
+                # Log failed execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": f"docker_{action}",
+                    "status": "failed",
+                    "command": f"docker {action} {container_id}",
+                    "output": "",
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": 0,
+                    "logs": str(e),
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/exec", methods=["POST"])
+        def docker_exec_command():
+            """Execute a command inside a Docker container."""
+            import datetime, time
+            data = request.json
+            machine_id = data.get("machine_id")
+            container_id = data.get("container_id")
+            command = data.get("command")
+            interactive = data.get("interactive", False)
+            
+            if not container_id or not command:
+                return jsonify({"success": False, "error": "Container ID and command are required"}), 400
+            
+            started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                if machine_id == "localhost":
+                    # Local Docker exec
+                    import subprocess
+                    cmd = ["docker", "exec"]
+                    if interactive:
+                        cmd.extend(["-it"])
+                    cmd.extend([container_id] + command.split())
+                    
+                    t0 = time.time()
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                    t1 = time.time()
+                    
+                    success = result.returncode == 0
+                    output = result.stdout.strip()
+                    errors = result.stderr
+                    exec_command = " ".join(cmd)
+                else:
+                    # Remote Docker exec
+                    machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+                    if not machine:
+                        return jsonify({"success": False, "error": "Machine not found"}), 404
+                    
+                    client = SSHClient(
+                        machine["host"],
+                        machine["username"],
+                        machine.get("password"),
+                        machine.get("port", 22),
+                        machine.get("key"),
+                    )
+                    client.login()
+                    t0 = time.time()
+                    result = client.docker_exec_command(container_id, command, interactive)
+                    t1 = time.time()
+                    client.close()
+                    
+                    success = result.get("success", False)
+                    output = result.get("output", "")
+                    errors = result.get("errors", "")
+                    exec_command = result.get("command", "")
+                
+                # Log execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": "docker_exec",
+                    "status": "success" if success else "failed",
+                    "command": exec_command,
+                    "output": output,
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": t1 - t0,
+                    "logs": errors or "",
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({
+                    "success": success,
+                    "output": output,
+                    "errors": errors,
+                    "command": exec_command
+                })
+                
+            except Exception as e:
+                # Log failed execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": "docker_exec",
+                    "status": "failed",
+                    "command": f"docker exec {container_id} {command}",
+                    "output": "",
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": 0,
+                    "logs": str(e),
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/stats", methods=["POST"])
+        def docker_container_stats():
+            """Get real-time stats for a Docker container."""
+            data = request.json
+            machine_id = data.get("machine_id")
+            container_id = data.get("container_id")
+            
+            if not container_id:
+                return jsonify({"success": False, "error": "Container ID is required"}), 400
+            
+            if machine_id == "localhost":
+                # Local Docker stats
+                try:
+                    import subprocess
+                    result = subprocess.run([
+                        "docker", "stats", "--no-stream", "--format", 
+                        "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}", 
+                        container_id
+                    ], capture_output=True, text=True, timeout=30)
+                    
+                    return jsonify({
+                        "success": result.returncode == 0,
+                        "output": result.stdout.strip(),
+                        "errors": result.stderr
+                    })
+                except Exception as e:
+                    return jsonify({"success": False, "error": str(e)})
+            
+            # Remote Docker stats
+            machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+            if not machine:
+                return jsonify({"success": False, "error": "Machine not found"}), 404
+            
+            try:
+                client = SSHClient(
+                    machine["host"],
+                    machine["username"],
+                    machine.get("password"),
+                    machine.get("port", 22),
+                    machine.get("key"),
+                )
+                client.login()
+                result = client.docker_get_container_stats(container_id)
+                client.close()
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/compose/up", methods=["POST"])
+        def docker_compose_up():
+            """Run docker-compose up."""
+            import datetime, time, os, subprocess
+            data = request.json
+            machine_id = data.get("machine_id")
+            compose_content = data.get("compose_content")
+            compose_file = data.get("compose_file", "docker-compose.yml")
+            detach = data.get("detach", True)
+            build = data.get("build", False)
+            
+            if not compose_content:
+                return jsonify({"success": False, "error": "Docker compose content is required"}), 400
+            
+            started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                if machine_id == "localhost":
+                    # Local Docker Compose
+                    import tempfile
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        compose_file_path = os.path.join(temp_dir, compose_file)
+                        with open(compose_file_path, 'w') as f:
+                            f.write(compose_content)
+                        
+                        cmd = ["docker-compose", "-f", compose_file_path, "up"]
+                        if detach:
+                            cmd.append("-d")
+                        if build:
+                            cmd.append("--build")
+                        
+                        t0 = time.time()
+                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+                        t1 = time.time()
+                        
+                        success = result.returncode == 0
+                        output = result.stdout.strip()
+                        errors = result.stderr
+                        command = " ".join(cmd)
+                else:
+                    # Remote Docker Compose
+                    machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+                    if not machine:
+                        return jsonify({"success": False, "error": "Machine not found"}), 404
+                    
+                    client = SSHClient(
+                        machine["host"],
+                        machine["username"],
+                        machine.get("password"),
+                        machine.get("port", 22),
+                        machine.get("key"),
+                    )
+                    client.login()
+                    
+                    # Create temporary compose file on remote
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as tmp_compose:
+                        tmp_compose.write(compose_content)
+                        tmp_compose.flush()
+                        
+                        # Upload compose file
+                        remote_compose_path = client.send_File(tmp_compose.name)
+                        os.unlink(tmp_compose.name)
+                        
+                        if not remote_compose_path:
+                            client.close()
+                            return jsonify({"success": False, "error": "Failed to upload compose file"})
+                    
+                    t0 = time.time()
+                    result = client.docker_compose_up(remote_compose_path, detach, build)
+                    t1 = time.time()
+                    client.close()
+                    
+                    success = result.get("success", False)
+                    output = result.get("output", "")
+                    errors = result.get("errors", "")
+                    command = result.get("command", f"docker-compose up")
+                
+                # Log execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": "docker_compose_up",
+                    "status": "success" if success else "failed",
+                    "command": command,
+                    "output": output,
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": t1 - t0,
+                    "logs": errors or "",
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({
+                    "success": success,
+                    "output": output,
+                    "errors": errors
+                })
+                
+            except Exception as e:
+                # Log failed execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": "docker_compose_up",
+                    "status": "failed",
+                    "command": f"docker-compose up",
+                    "output": "",
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": 0,
+                    "logs": str(e),
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/system/prune", methods=["POST"])
+        def docker_system_prune():
+            """Clean up Docker system (remove unused data)."""
+            import datetime, time
+            data = request.json
+            machine_id = data.get("machine_id")
+            all_unused = data.get("all", False)
+            volumes = data.get("volumes", False)
+            containers = data.get("containers", False)
+            
+            started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                if machine_id == "localhost":
+                    # Local Docker system prune
+                    import subprocess
+                    
+                    output_lines = []
+                    
+                    # Remove unused containers first if requested
+                    if containers:
+                        containers_cmd = ["docker", "container", "prune", "-f"]
+                        containers_result = subprocess.run(containers_cmd, capture_output=True, text=True, timeout=300)
+                        if containers_result.returncode == 0:
+                            output_lines.append("Container cleanup:")
+                            output_lines.append(containers_result.stdout.strip())
+                            output_lines.append("")
+                    
+                    # Standard system prune
+                    cmd = ["docker", "system", "prune", "-f"]
+                    if all_unused:
+                        cmd.append("-a")
+                    if volumes:
+                        cmd.append("--volumes")
+                    
+                    t0 = time.time()
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                    t1 = time.time()
+                    
+                    success = result.returncode == 0
+                    
+                    # Combine outputs
+                    if output_lines:
+                        output_lines.append("System cleanup:")
+                        output_lines.append(result.stdout.strip())
+                        output = "\n".join(output_lines)
+                    else:
+                        output = result.stdout.strip()
+                    
+                    errors = result.stderr
+                    command = " ".join(cmd)
+                    if containers:
+                        command = f"docker container prune -f && {command}"
+                else:
+                    # Remote Docker system prune
+                    machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+                    if not machine:
+                        return jsonify({"success": False, "error": "Machine not found"}), 404
+                    
+                    client = SSHClient(
+                        machine["host"],
+                        machine["username"],
+                        machine.get("password"),
+                        machine.get("port", 22),
+                        machine.get("key"),
+                    )
+                    client.login()
+                    t0 = time.time()
+                    result = client.docker_system_prune(all_unused, volumes, containers)
+                    t1 = time.time()
+                    client.close()
+                    
+                    success = result.get("success", False)
+                    output = result.get("output", "")
+                    errors = result.get("errors", "")
+                    command = result.get("command", "docker system prune")
+                    if containers:
+                        command = f"docker container prune -f && {command}"
+                
+                # Log execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": "docker_system_prune",
+                    "status": "success" if success else "failed",
+                    "command": command,
+                    "output": output,
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": t1 - t0,
+                    "logs": errors or "",
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({
+                    "success": success,
+                    "output": output,
+                    "errors": errors
+                })
+                
+            except Exception as e:
+                # Log failed execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": "docker_system_prune",
+                    "status": "failed",
+                    "command": "docker system prune",
+                    "output": "",
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": 0,
+                    "logs": str(e),
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({"success": False, "error": str(e)}), 500
+
         # Add this endpoint to support /api/test-connection for the UI
         @app.route('/api/test-connection', methods=['POST'])
         def test_connection_api():

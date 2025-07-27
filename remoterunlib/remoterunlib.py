@@ -1574,6 +1574,510 @@ class SSHClient:
         
         return cmd
 
+    # === DOCKER MANAGEMENT METHODS ===
+    
+    def docker_info(self):
+        """Get Docker system information."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            # Get Docker version and info
+            version_output, version_errors = self.run_command("docker --version", verbose=False)
+            info_output, info_errors = self.run_command("docker info --format json", verbose=False)
+            
+            if version_errors and "command not found" in version_errors.lower():
+                return {"success": False, "error": "Docker is not installed on this machine"}
+            
+            return {
+                "success": True,
+                "version": version_output.strip() if version_output else "",
+                "info": info_output.strip() if info_output else "",
+                "errors": version_errors or info_errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_list_images(self):
+        """List all Docker images."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            output, errors = self.run_command("docker images --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedAt}}\t{{.Size}}'", verbose=False)
+            
+            if errors and "command not found" in errors.lower():
+                return {"success": False, "error": "Docker is not installed on this machine"}
+            
+            return {
+                "success": True,
+                "output": output.strip() if output else "",
+                "errors": errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_list_containers(self, all_containers=True):
+        """List Docker containers."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            flag = "-a" if all_containers else ""
+            cmd = f"docker ps {flag} --format 'table {{.ID}}\t{{.Image}}\t{{.Command}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}'"
+            output, errors = self.run_command(cmd, verbose=False)
+            
+            if errors and "command not found" in errors.lower():
+                return {"success": False, "error": "Docker is not installed on this machine"}
+            
+            return {
+                "success": True,
+                "output": output.strip() if output else "",
+                "errors": errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_list_networks(self):
+        """List Docker networks."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            output, errors = self.run_command("docker network ls --format 'table {{.ID}}\t{{.Name}}\t{{.Driver}}\t{{.Scope}}'", verbose=False)
+            
+            if errors and "command not found" in errors.lower():
+                return {"success": False, "error": "Docker is not installed on this machine"}
+            
+            return {
+                "success": True,
+                "output": output.strip() if output else "",
+                "errors": errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_list_volumes(self):
+        """List Docker volumes."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            output, errors = self.run_command("docker volume ls --format 'table {{.Driver}}\t{{.Name}}'", verbose=False)
+            
+            if errors and "command not found" in errors.lower():
+                return {"success": False, "error": "Docker is not installed on this machine"}
+            
+            return {
+                "success": True,
+                "output": output.strip() if output else "",
+                "errors": errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_inspect_container(self, container_id):
+        """Inspect a Docker container."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            output, errors = self.run_command(f"docker inspect {container_id}", verbose=False)
+            
+            return {
+                "success": not bool(errors),
+                "output": output.strip() if output else "",
+                "errors": errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_container_logs(self, container_id, tail=50):
+        """Get container logs."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            output, errors = self.run_command(f"docker logs --tail {tail} {container_id}", verbose=False)
+            
+            return {
+                "success": True,
+                "output": output.strip() if output else "",
+                "errors": errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_pull_image(self, image_name):
+        """Pull a Docker image."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            print(f"Pulling Docker image: {image_name}")
+            output, errors = self.run_command(f"docker pull {image_name}", timeout=600)
+            
+            success = not bool(errors) or "downloaded" in output.lower() or "up to date" in output.lower()
+            
+            return {
+                "success": success,
+                "output": output.strip() if output else "",
+                "errors": errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_run_container(self, image_name, container_name=None, ports=None, volumes=None, env_vars=None, detach=True, additional_args=""):
+        """Run a Docker container."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            cmd = "docker run"
+            
+            if detach:
+                cmd += " -d"
+            
+            if container_name:
+                cmd += f" --name {container_name}"
+            
+            if ports:
+                for port_mapping in ports:
+                    cmd += f" -p {port_mapping}"
+            
+            if volumes:
+                for volume_mapping in volumes:
+                    cmd += f" -v {volume_mapping}"
+            
+            if env_vars:
+                for env_var in env_vars:
+                    cmd += f" -e {env_var}"
+            
+            if additional_args:
+                cmd += f" {additional_args}"
+            
+            cmd += f" {image_name} tail -f /dev/null"
+            
+            print(f"Running Docker container: {cmd}")
+            output, errors = self.run_command(cmd)
+            
+            success = not bool(errors) or len(output.strip()) > 0
+            
+            return {
+                "success": success,
+                "output": output.strip() if output else "",
+                "errors": errors,
+                "command": cmd
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_stop_container(self, container_id):
+        """Stop a Docker container."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            output, errors = self.run_command(f"docker stop {container_id}")
+            
+            success = not bool(errors)
+            
+            return {
+                "success": success,
+                "output": output.strip() if output else "",
+                "errors": errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_start_container(self, container_id):
+        """Start a Docker container."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            # Start the container in detached mode
+            output, errors = self.run_command(f"docker start {container_id}")
+            
+            # Docker start command typically returns the container ID on success
+            # If there are no errors and we got output, it's successful
+            success = not bool(errors) and bool(output.strip())
+            
+            # If start failed but container might need interactive/TTY flags, try alternative
+            if not success and errors:
+                print(f"Standard start failed, trying with detached mode: {errors}")
+                # Try starting with detached flag (for containers that need it)
+                output2, errors2 = self.run_command(f"docker start {container_id}")
+                if not bool(errors2) and bool(output2.strip()):
+                    success = True
+                    output = output2
+                    errors = errors2
+            
+            return {
+                "success": success,
+                "output": output.strip() if output else "",
+                "errors": errors,
+                "command": f"docker start {container_id}"
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_restart_container(self, container_id):
+        """Restart a Docker container."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            output, errors = self.run_command(f"docker restart {container_id}")
+            
+            success = not bool(errors)
+            
+            return {
+                "success": success,
+                "output": output.strip() if output else "",
+                "errors": errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_remove_container(self, container_id, force=False):
+        """Remove a Docker container."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            cmd = f"docker rm {container_id}"
+            if force:
+                cmd = f"docker rm -f {container_id}"
+            
+            output, errors = self.run_command(cmd)
+            
+            success = not bool(errors)
+            
+            return {
+                "success": success,
+                "output": output.strip() if output else "",
+                "errors": errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_remove_image(self, image_id, force=False):
+        """Remove a Docker image."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            cmd = f"docker rmi {image_id}"
+            if force:
+                cmd = f"docker rmi -f {image_id}"
+            
+            output, errors = self.run_command(cmd)
+            
+            success = not bool(errors)
+            
+            return {
+                "success": success,
+                "output": output.strip() if output else "",
+                "errors": errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_exec_command(self, container_id, command, interactive=False):
+        """Execute a command inside a Docker container."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            cmd = f"docker exec"
+            if interactive:
+                cmd += " -it"
+            cmd += f" {container_id} {command}"
+            
+            output, errors = self.run_command(cmd)
+            
+            return {
+                "success": True,
+                "output": output.strip() if output else "",
+                "errors": errors,
+                "command": cmd
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_build_image(self, dockerfile_path, image_name, build_context="."):
+        """Build a Docker image from Dockerfile."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            cmd = f"docker build -f {dockerfile_path} -t {image_name} {build_context}"
+            
+            print(f"Building Docker image: {cmd}")
+            output, errors = self.run_command(cmd, timeout=600)
+            
+            success = "successfully built" in output.lower() or "successfully tagged" in output.lower()
+            
+            return {
+                "success": success,
+                "output": output.strip() if output else "",
+                "errors": errors,
+                "command": cmd
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_get_container_stats(self, container_id):
+        """Get real-time stats for a container."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            # Get one-time stats (no streaming)
+            output, errors = self.run_command(f"docker stats --no-stream --format 'table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}' {container_id}", verbose=False)
+            
+            return {
+                "success": not bool(errors),
+                "output": output.strip() if output else "",
+                "errors": errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_compose_up(self, compose_file_path, detach=True, build=False):
+        """Run docker-compose up."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            cmd = f"docker-compose -f {compose_file_path} up"
+            if detach:
+                cmd += " -d"
+            if build:
+                cmd += " --build"
+            
+            output, errors = self.run_command(cmd, timeout=600)
+            
+            success = not bool(errors) or "started" in output.lower()
+            
+            return {
+                "success": success,
+                "output": output.strip() if output else "",
+                "errors": errors,
+                "command": cmd
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_compose_down(self, compose_file_path, remove_volumes=False):
+        """Run docker-compose down."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            cmd = f"docker-compose -f {compose_file_path} down"
+            if remove_volumes:
+                cmd += " -v"
+            
+            output, errors = self.run_command(cmd)
+            
+            success = not bool(errors)
+            
+            return {
+                "success": success,
+                "output": output.strip() if output else "",
+                "errors": errors,
+                "command": cmd
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_system_prune(self, all_unused=False, volumes=False, containers=False):
+        """Clean up Docker system."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            output_lines = []
+            
+            # Remove unused containers first if requested
+            if containers:
+                containers_output, containers_errors = self.run_command("docker container prune -f")
+                if not containers_errors:
+                    output_lines.append("Container cleanup:")
+                    output_lines.append(containers_output.strip())
+                    output_lines.append("")
+            
+            # Standard system prune
+            cmd = "docker system prune -f"
+            if all_unused:
+                cmd += " -a"
+            if volumes:
+                cmd += " --volumes"
+            
+            output, errors = self.run_command(cmd)
+            
+            success = not bool(errors)
+            
+            # Combine outputs
+            if output_lines:
+                output_lines.append("System cleanup:")
+                output_lines.append(output.strip())
+                final_output = "\n".join(output_lines)
+            else:
+                final_output = output.strip() if output else ""
+            
+            return {
+                "success": success,
+                "output": final_output,
+                "errors": errors,
+                "command": cmd
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_get_running_containers_with_ports(self):
+        """Get running containers with exposed ports information."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            # Get detailed container information with ports
+            output, errors = self.run_command("docker ps --format 'json'", verbose=False)
+            
+            if errors and "command not found" in errors.lower():
+                return {"success": False, "error": "Docker is not installed on this machine"}
+            
+            return {
+                "success": True,
+                "output": output.strip() if output else "",
+                "errors": errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def __del__(self):
         """Ensure the SSH connection is closed when the object is deleted."""
         self.close()
