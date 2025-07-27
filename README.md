@@ -6,13 +6,15 @@
 
 Windows : [openssh_install](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse?tabs=powershell)
 
+
 ## Features
 
 - **SSH Connection Management**: Easily manage SSH connections with support for password and key-based authentication.
 - **Remote Command Execution**: Run shell commands on remote machines.
 - **Remote Python Function Invocation**: Serialize and execute Python functions remotely.
 - **PowerShell Command Execution**: Execute PowerShell commands on remote Windows machines.
-- **Remote machine Restart**: Restart the remote machine
+-- **Remote machine Restart**: Restart the remote machine
+- **Web Dashboard**: Manage remote machines and execute commands via a Flask-based web dashboard with REST API and WebSocket support.
 ## Installation
 
 Install the package using pip:
@@ -115,6 +117,82 @@ ssh_client.reboot(wait_until=300) # wait until 300 seconds
 # Close the SSH connection
 client.close()
 ```
+
+
+### Dashboard: Enterprise Remote Management
+
+The `remoterunlib` Dashboard provides a modern, enterprise-grade web interface for managing remote machines, executing commands, running scripts, and automating infrastructure tasks. Designed for IT teams, DevOps, and cloud engineers, it offers:
+
+- **Machine Management**: Add, update, and organize remote hosts.
+- **Command Execution**: Run shell/CLI commands with live output and error logs.
+- **Python Script Execution**: Upload and execute Python scripts remotely.
+- **Directory/File Transfer**: Send and receive files/directories with ease.
+- **Ansible Playbooks**: Run playbooks or ad-hoc commands, view results and logs.
+- **Terraform Automation**: Execute plans, applies, imports, and more, with full output.
+- **Live Logs & Execution History**: View real-time logs and track all executions.
+- **REST API & WebSocket**: Integrate with CI/CD or other tools, receive live updates.
+
+### Dashboard Screenshots
+
+#### 1. Dashboard Home
+![Dashboard Home](https://raw.githubusercontent.com/dsharathrao/remoterunlib/refs/heads/dev/asserts/dashboard/dashboard1.png)
+
+#### 2. Machine Management
+![Machine Management](https://raw.githubusercontent.com/dsharathrao/remoterunlib/refs/heads/dev/asserts/dashboard/dashboard2.png)
+
+#### 3. Execute CLI Commands
+![Execute CLI Commands](https://raw.githubusercontent.com/dsharathrao/remoterunlib/refs/heads/dev/asserts/dashboard/dashboard3.png)
+
+#### 4. Run Python Scripts
+![Run Python Scripts](https://raw.githubusercontent.com/dsharathrao/remoterunlib/refs/heads/dev/asserts/dashboard/dashboard4.png)
+
+#### 5. Run Ansible Playbooks
+![Run Ansible Playbooks](https://raw.githubusercontent.com/dsharathrao/remoterunlib/refs/heads/dev/asserts/dashboard/dashboard5.png)
+
+#### 6. Run Terraform Playbooks
+![Run Terraform Playbooks](https://raw.githubusercontent.com/dsharathrao/remoterunlib/refs/heads/dev/asserts/dashboard/dashboard6.png)
+
+### Many more...
+---
+
+### Quick Start
+
+```python
+from remoterunlib import Dashboard
+
+client = Dashboard(host='localhost', port=8000)
+client.serve()
+```
+
+This launches a Flask server at `http://localhost:8000` with a secure, responsive web UI and REST API. Manage machines, execute commands, run scripts, and automate infrastructure from your browser.
+
+#### Key Features
+
+- **Command Execution**: Run shell commands on any managed machine, with live logs and error reporting.
+- **Python Script Runner**: Upload and execute Python scripts, view output and errors in real time.
+- **File & Directory Transfer**: Send/receive files and directories between local and remote hosts.
+- **Ansible Automation**: Run playbooks or ad-hoc commands, monitor execution, and review logs/history.
+- **Terraform Automation**: Plan, apply, import, and manage infrastructure as code, with full output and error tracking.
+- **Execution History**: Every action is logged; review past executions, outputs, and errors.
+- **Live Logs**: Real-time streaming of command/script/playbook output via WebSocket.
+- **Enterprise Security**: Role-based access, audit logs, and encrypted credentials (coming soon).
+- **REST API**: Integrate with CI/CD pipelines, automation tools, or custom dashboards.
+
+#### API Endpoints
+
+- `GET /api/machines` — List all machines
+- `POST /api/machines` — Add a new machine
+- `PUT /api/machines/<machine_id>` — Update a machine
+- `DELETE /api/machines/<machine_id>` — Delete a machine
+- `POST /api/execute-command` — Execute a shell command on a machine
+- `POST /api/run-python` — Run a Python script on a machine
+- `POST /api/run-ansible` — Run an Ansible playbook or ad-hoc command
+- `POST /api/run-terraform` — Run Terraform plan/apply/destroy
+- `POST /api/ping-machine` — Ping a machine by ID
+
+The dashboard also provides a web UI at `/` and supports live logs via WebSocket (`/ws`).
+
+---
 
 ### Advanced Usage
 

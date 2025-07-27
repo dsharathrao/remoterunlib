@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "remoterunlib"
-version = "0.4.1"
+version = "0.7"
 description = "remoterunlib is a Python library that facilitates remote command execution"
 readme = "README.md"
 authors = ["Sharath Kumar <dsharathrao@gmail.com>"]
@@ -29,6 +29,9 @@ classifiers = [
 [tool.poetry.dependencies]
 python = ">=3.6"
 paramiko = "3.4.0"
+flask-socketio = "^5.5.0"
+flask-cors = "^4.0.0"
+ansible = {version = "^8.7.0", markers = "sys_platform == 'linux'"}
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2"
