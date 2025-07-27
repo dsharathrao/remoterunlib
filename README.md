@@ -135,6 +135,7 @@ The `remoterunlib` Dashboard provides a modern, enterprise-grade web interface f
 ### Dashboard Screenshots
 
 #### 1. Dashboard Home
+
 ![Dashboard Home](https://raw.githubusercontent.com/dsharathrao/remoterunlib/refs/heads/main/asserts/dashboard/dashboard1.png)
 
 #### 2. Machine Management
