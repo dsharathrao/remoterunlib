@@ -33,7 +33,7 @@ flask-socketio = "^5.5.0"
 flask-cors = "^4.0.0"
 ansible = {version = "^8.7.0", markers = "sys_platform == 'linux'"}
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 pytest = "^6.2"
 paramiko = "3.4.0"
 pre-commit = "^2.12"
