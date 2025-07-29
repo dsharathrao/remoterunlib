@@ -1,6 +1,7 @@
 # remoterunlib
 
-`remoterunlib` is a Python library for remote command execution, Python function invocation, PowerShell commands, Docker management, and more, all over SSH. It is built on Paramiko and Flask, and gives a simple way to manage remote machines, run scripts, and automate infra from your browser or Python code.
+
+`remoterunlib` is a Python library for remote command execution, file transfer, Docker, Ansible, Terraform, PowerShell, and more, all over SSH. It also provides a modern Flask dashboard for managing remote machines and infrastructure from your browser or Python code.
 
 ## OpenSSH setup
 
@@ -9,13 +10,14 @@ Windows : [openssh_install](https://learn.microsoft.com/en-us/windows-server/adm
 
 ## Features
 
-- **SSH Connection Management**: Manage SSH connections with password or key authentication.
-- **Remote Command Execution**: Run shell commands on remote machines easily.
-- **Remote Python Function Invocation**: Run Python scripts/functions remotely.
-- **PowerShell Command Execution**: Run PowerShell commands on Windows remote machines.
-- **Remote machine Restart**: Restart remote machine with one line.
-- **Docker Management**: Run and manage Docker containers (localhost supported).
-- **Web Dashboard**: Manage everything from a modern Flask dashboard with REST API and WebSocket live logs.
+- **SSH Connection Management**: Connect to remote machines with password or key authentication.
+- **Remote Command Execution**: Run shell, PowerShell, and Python commands/scripts remotely.
+- **File Transfer**: Send and receive files easily.
+- **Docker Management**: List, start, stop, remove containers/images, and run Docker Compose projects.
+- **Ansible Automation**: Run playbooks and ad-hoc commands on remote hosts.
+- **Terraform Automation**: Run init/plan/apply/import and custom Terraform commands locally or remotely.
+- **Web Dashboard**: Manage everything from a modern Flask dashboard with REST API and live logs.
+- **Execution History**: Track, cancel, and view status of remote executions.
 ## Installation
 
 Install the package using pip:
@@ -27,41 +29,76 @@ pip install remoterunlib
 
 ## Usage
 
-### Simple Examples (See `demo/` folder)
 
-#### 1. Connect and Run Command
+## Usage Examples
+
+See the `demo/` folder for more examples.
+
+### 1. Connect and Run Commands
 ```python
 from remoterunlib import SSHClient
+
 client = SSHClient(hostname='192.168.1.10', username='user', password='pass')
 client.login()
-output, errors = client.run_command('ls -l')
-print(output)
+
+# Run shell command
+result = client.run_command('ls -l')
+print(result)
+
+# Run PowerShell command (on Windows target)
+ps_result = client.run_powershell_command('Get-Process')
+print(ps_result)
+
 client.close()
 ```
 
-#### 2. Send and Receive Files
+### 2. File Transfer
 ```python
-# Send file to remote
-client.send_File('demo_sendFile.txt')
-# Receive file from remote
-client.receive_File('C:/temp/sharath.txt', 'sharath.txt')
+client.send_File('local_file.txt')  # Send file to remote
+client.receive_File('/remote/path/file.txt', 'downloaded.txt')  # Receive file from remote
 ```
 
-#### 3. Run Python Script Remotely
+### 3. Docker Management
 ```python
-client.run_python_file('demo/selenium_test_script.py')
+# List containers and images
+print(client.docker_list_containers())
+print(client.docker_list_images())
+
+# Start/Stop/Remove containers
+client.docker_start_container('container_name')
+client.docker_stop_container('container_name')
+client.docker_remove_container('container_name')
+
+# Run Docker Compose project
+client.docker_compose_project_action('docker-compose.yml', action='up', detach=True)
 ```
 
-#### 4. Run PowerShell Command
+### 4. Ansible Automation
 ```python
-ps_output, ps_errors = client.run_powershell_command('Get-Process')
-print(ps_output)
+# Run playbook
+client.run_ansible_playbook('test_playbook.yml', inventory_file='inventory.ini')
+
+# Run ad-hoc command
+client.run_ansible_playbook('uptime', inventory_file='inventory.ini')
 ```
 
-#### 5. Ping and Reboot
+### 5. Terraform Automation
 ```python
-client.ping()  # returns True if reachable
-client.reboot(wait_until=60)  # reboots and waits 60 seconds
+# Local execution
+client.run_terraform_init(work_dir='terraform/aws')
+client.run_terraform_plan(work_dir='terraform/aws', vars_dict={'instance_type': 't2.micro'})
+client.run_terraform_apply(work_dir='terraform/aws', plan_file='tfplan')
+
+# Remote execution (if SSH target has Terraform)
+client.run_terraform_init(work_dir='terraform/aws', remote=True)
+```
+
+### 6. Web Dashboard
+```python
+from remoterunlib import Dashboard
+
+dashboard = Dashboard(host='localhost', port=8000)
+dashboard.serve()  # Starts the Flask dashboard
 ```
 
 
@@ -77,7 +114,7 @@ client.serve()
 # Go to Docker tab to manage containers/images easily
 ```
 
-**B. Using Python Code (see `demo/docker/docker_example.py`):**
+**B. Using Python Code ([demo/docker/docker_example.py](https://github.com/dsharathrao/remoterunlib/blob/main/demo/docker/docker_example.py)):**
 ```python
 from remoterunlib import SSHClient
 
@@ -112,14 +149,14 @@ print("Remove image result:", result)
 client.close()
 ```
 
-For a full working example, see [`demo/docker/docker_example.py`](demo/docker/docker_example.py).
+For a full working example, see [demo/docker/docker_example.py](https://github.com/dsharathrao/remoterunlib/blob/main/demo/docker/docker_example.py).
 
-#### 7. Run Ansible Playbook (see `demo/Ansible/main.py`)
+#### 7. Run Ansible Playbook ([demo/Ansible/main.py](https://github.com/dsharathrao/remoterunlib/blob/main/demo/Ansible/main.py))
 ```python
 client.run_ansible_playbook('test_playbook.yml', inventory_file='inventory.ini')
 ```
 
-#### 8. Run Terraform (see `demo/terraform/main.py`)
+#### 8. Run Terraform ([demo/terraform/main.py](https://github.com/dsharathrao/remoterunlib/blob/main/demo/terraform/main.py))
 ```python
 client.run_terraform_init(work_dir='terraform/aws')
 client.run_terraform_plan(work_dir='terraform/aws')
@@ -219,13 +256,13 @@ client2 = SSHClient(hostname='remote_host', port=22, username='user', password='
 assert client1 is client2
 ```
 
-#### Ansible Playbooks/Ad-hoc (see `demo/Ansible/main.py`)
+#### Ansible Playbooks/Ad-hoc ([demo/Ansible/main.py](https://github.com/dsharathrao/remoterunlib/blob/main/demo/Ansible/main.py))
 ```python
 client.run_ansible_playbook('site.yml', inventory_file='inventory.ini', out='ansible_output.log', display=True)
 client.run_ansible_playbook('uptime', inventory_file='inventory.ini', out='adhoc_output.log')
 ```
 
-#### Terraform Automation (see `demo/terraform/main.py`)
+#### Terraform Automation ([demo/terraform/main.py](https://github.com/dsharathrao/remoterunlib/blob/main/demo/terraform/main.py))
 ```python
 aws_backend = {'bucket': 'my-tf-state-bucket', 'key': 'state/terraform.tfstate', 'region': 'us-east-1'}
 client.run_terraform_init(work_dir='terraform/aws', backend_config=aws_backend)

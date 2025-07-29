@@ -1,32 +1,23 @@
+
 from remoterunlib import SSHClient
 
-# Example: Manage Docker containers/images on localhost
 if __name__ == "__main__":
     client = SSHClient(hostname="localhost", username="your_username", password="your_password")
     client.login()
 
-    # List Docker containers
-    containers = client.docker_list_containers()
-    print("Containers:", containers)
+    # List Docker containers and images
+    print(client.docker_list_containers())
+    print(client.docker_list_images())
 
-    # List Docker images
-    images = client.docker_list_images()
-    print("Images:", images)
-
-    # Start a container
-    result = client.docker_start_container(container_id_or_name="my_container")
-    print("Start container result:", result)
-
-    # Stop a container
-    result = client.docker_stop_container(container_id_or_name="my_container")
-    print("Stop container result:", result)
-
-    # Remove a container
-    result = client.docker_remove_container(container_id_or_name="my_container")
-    print("Remove container result:", result)
+    # Start/Stop/Remove a container
+    client.docker_start_container("my_container")
+    client.docker_stop_container("my_container")
+    client.docker_remove_container("my_container")
 
     # Remove an image
-    result = client.docker_remove_image(image_id_or_name="my_image")
-    print("Remove image result:", result)
+    client.docker_remove_image("my_image")
+
+    # Run Docker Compose project
+    client.docker_compose_project_action("docker-compose.yml", action="up", detach=True)
 
     client.close()

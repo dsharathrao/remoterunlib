@@ -1,5 +1,6 @@
+
 from remoterunlib import Dashboard
 
-client = Dashboard(host='localhost', port=8000)
-
-client.serve()
+if __name__ == "__main__":
+    dashboard = Dashboard(host='localhost', port=8000)
+    dashboard.serve()  # Starts the Flask dashboard

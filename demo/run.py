@@ -1,33 +1,28 @@
+
 from remoterunlib import SSHClient
-
-
-
 
 # Example usage
 if __name__ == "__main__":
+    # Update with your server details
+    hostname = "192.168.0.100"
+    username = "sharath"
+    password = ""
 
-    hostname = "hostname or IP"  # Replace with your server's hostname or IP
-    port = 22  # SSH port (usually 22)
-    username = "username"  # Replace with your SSH username
-    password = "password"  # Replace with your SSH password
+    client = SSHClient(hostname, username, password)
+    client.login()
 
-    ssh_client = SSHClient(hostname, username, password)
-    ssh_client.login()
-    # result = ssh_client.run_command(
-    #     "pip install bs4 selenium selenium_stealth webdriver-manager --upgrade"
-    # )
-    # print(result)
-    # result = ssh_client.run_python_file("demo/selenium_test_script.py")
-    # print(f"Result from remote function: {result}")
-    # ssh_client.run_command("dir")
-    
-    ssh_client.send_File("demo_sendFile.txt")
-    ssh_client.receive_File("C:\\temp\\sharath.txt", "sharath.txt")
-    ssh_client.ping()
-    ssh_client.run_command("dir")
-    # ssh_client.reboot()
-    ssh_client.run_command("dir")
-    ssh_client1 = SSHClient(hostname, username, password)
-    result = ssh_client1.run_powershell_command("Get-Process")
-    ssh_client.close()
-    ssh_client1.close()
+    # Run a shell command
+    print(client.run_command("ls -l"))
+
+    # Send and receive files
+    client.send_File("demo_sendFile.txt")
+    client.receive_File("/tmp/remote_file.txt", "downloaded.txt")
+
+    # Run PowerShell command (on Windows target)
+    print(client.run_powershell_command("Get-Process"))
+
+    # Ping and reboot
+    print(client.ping())
+    # client.reboot(wait_until=60)
+
+    client.close()
