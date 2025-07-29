@@ -1969,7 +1969,7 @@ class SSHClient:
             return {"success": False, "error": "No connection"}
         
         try:
-            cmd = f"docker-compose -f {compose_file_path} up"
+            cmd = f"docker compose -f {compose_file_path} up"
             if detach:
                 cmd += " -d"
             if build:
@@ -2074,6 +2074,707 @@ class SSHClient:
                 "success": True,
                 "output": output.strip() if output else "",
                 "errors": errors
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def docker_compose_project_action(self, compose_file_path, action="up", detach=True, build=False, force_recreate=False, remove_orphans=False, timeout=600):
+        """Run docker compose actions with various options for project execution."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            cmd = f"docker compose -f {compose_file_path} {action}"
+            
+            if action == "up":
+                if detach:
+                    cmd += " -d"
+                if build:
+                    cmd += " --build"
+                if force_recreate:
+                    cmd += " --force-recreate"
+                if remove_orphans:
+                    cmd += " --remove-orphans"
+            elif action == "down":
+                if remove_orphans:
+                    cmd += " --remove-orphans"
+            
+            print(f"Executing Docker Compose: {cmd}")
+            output, errors = self.run_command(cmd, timeout=timeout)
+            
+            success = not bool(errors) or "started" in output.lower() or "created" in output.lower() or "stopped" in output.lower()
+            
+            return {
+                "success": success,
+                "output": output.strip() if output else "",
+                "errors": errors,
+                "command": cmd
+            }
+        except Exception as e:
+            print(f"Failed to execute docker compose project action: {e}")
+            return {
+                "success": False,
+                "output": "",
+                "errors": str(e),
+                "command": cmd
+            }
+
+    def run_docker_build(self, dockerfile_path, tag=None, build_args=None, build_context=None):
+        """Build Docker image from Dockerfile with advanced options."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            import os
+            
+            # Get directory containing Dockerfile if build_context not specified
+            if build_context is None:
+                build_context = os.path.dirname(dockerfile_path) if dockerfile_path else "."
+            
+            cmd = f"docker build"
+            if tag:
+                cmd += f" -t {tag}"
+            if build_args:
+                for key, value in build_args.items():
+                    cmd += f" --build-arg {key}={value}"
+            cmd += f" -f {dockerfile_path} {build_context}"
+            
+            print(f"Building Docker image: {cmd}")
+            output, errors = self.run_command(cmd, timeout=600)
+            
+            success = not bool(errors) or "successfully built" in output.lower() or "successfully tagged" in output.lower()
+            
+            return {
+                "success": success,
+                "output": output.strip() if output else "",
+                "errors": errors,
+                "command": cmd
+            }
+        except Exception as e:
+            print(f"Failed to build Docker image: {e}")
+            return {
+                "success": False,
+                "output": "",
+                "errors": str(e),
+                "command": cmd
+            }
+
+    def run_docker_project_directory(self, project_dir, main_file=None, action="up", build=False, detach=True, force_recreate=False, remove_orphans=False):
+        """
+        Execute a Docker project directory with docker-compose.yml or Dockerfile.
+        This method handles both types of Docker projects:
+        1. Docker Compose projects (with docker-compose.yml)
+        2. Dockerfile projects (with Dockerfile)
+        
+        Args:
+            project_dir (str): Path to the project directory
+            main_file (str, optional): Main file to use (docker-compose.yml, Dockerfile, etc.)
+            action (str): Docker action ('up', 'down', 'build', 'logs', etc.)
+            build (bool): Whether to build images before starting
+            detach (bool): Whether to run in detached mode
+            force_recreate (bool): Force recreate containers
+            remove_orphans (bool): Remove orphaned containers
+        
+        Returns:
+            dict: Execution result with success, output, error, and execution details
+        """
+        import os
+        import time
+        
+        if not os.path.isdir(project_dir):
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Project directory not found: {project_dir}",
+                "main_file": main_file,
+                "execution_location": "none"
+            }
+        
+        start_time = time.time()
+        
+        # Auto-detect main file if not provided
+        if not main_file:
+            main_file = self._detect_docker_main_file(project_dir)
+            if not main_file:
+                return {
+                    "success": False,
+                    "output": "",
+                    "error": f"No Docker main file found (docker-compose.yml or Dockerfile) in {project_dir}",
+                    "main_file": None,
+                    "execution_location": "none"
+                }
+        
+        # Validate main file exists
+        main_file_path = os.path.join(project_dir, main_file)
+        if not os.path.exists(main_file_path):
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Main file not found: {main_file_path}",
+                "main_file": main_file,
+                "execution_location": "none"
+            }
+        
+        try:
+            # Always execute on remote host if connected
+            if self.client:
+                return self._execute_docker_project_remote(project_dir, main_file, action, build, detach, force_recreate, remove_orphans, start_time)
+            else:
+                return {
+                    "success": False,
+                    "output": "",
+                    "error": "Not connected to remote host. Call login() first.",
+                    "main_file": main_file,
+                    "execution_location": "local"
+                }
+                
+        except Exception as e:
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Docker project execution failed: {str(e)}",
+                "main_file": main_file,
+                "execution_location": "remote"
+            }
+    
+    def _detect_docker_main_file(self, project_dir):
+        """Detect the main Docker file in a project directory."""
+        import os
+        
+        # Look for docker-compose files first (higher priority)
+        compose_candidates = [
+            "docker-compose.yml", "docker-compose.yaml",
+            "compose.yml", "compose.yaml"
+        ]
+        for candidate in compose_candidates:
+            if os.path.exists(os.path.join(project_dir, candidate)):
+                return candidate
+        
+        # Look for Dockerfile
+        dockerfile_candidates = [
+            "Dockerfile", "dockerfile", "Dockerfile.prod", "Dockerfile.dev"
+        ]
+        for candidate in dockerfile_candidates:
+            if os.path.exists(os.path.join(project_dir, candidate)):
+                return candidate
+        
+        return None
+    
+    def _execute_docker_project_remote(self, project_dir, main_file, action, build, detach, force_recreate, remove_orphans, start_time):
+        """Execute Docker project on remote host."""
+        import time
+        import os
+        
+        if not self.client:
+            return {
+                "success": False,
+                "output": "",
+                "error": "Not connected to remote host. Call login() first.",
+                "main_file": main_file,
+                "execution_location": "remote"
+            }
+        
+        # Upload entire project directory
+        print(f"Uploading Docker project directory {project_dir} to remote host...")
+        remote_dir = self.send_Directory(project_dir)
+        
+        if not remote_dir:
+            return {
+                "success": False,
+                "output": "",
+                "error": "Failed to upload project directory to remote host",
+                "main_file": main_file,
+                "execution_location": "remote"
+            }
+        
+        print(f"Docker project uploaded to: {remote_dir}")
+        
+        # Build the full path to the main file
+        remote_main_file_path = os.path.join(remote_dir, main_file).replace("\\", "/")
+        
+        # Determine project type and build appropriate command
+        if main_file.lower().startswith("docker-compose") or main_file.lower().startswith("compose"):
+            # Docker Compose project
+            result = self.docker_compose_project_action(
+                compose_file_path=remote_main_file_path,
+                action=action,
+                detach=detach,
+                build=build,
+                force_recreate=force_recreate,
+                remove_orphans=remove_orphans
+            )
+        elif main_file.lower() == "dockerfile" or main_file.lower().startswith("dockerfile"):
+            # Dockerfile project
+            if action == "build":
+                # Build the image
+                image_tag = f"project-{os.path.basename(project_dir).lower()}"
+                result = self.run_docker_build(
+                    dockerfile_path=remote_main_file_path,
+                    tag=image_tag,
+                    build_context=remote_dir
+                )
+            else:
+                # For other actions, we need to build first then run
+                image_tag = f"project-{os.path.basename(project_dir).lower()}"
+                build_result = self.run_docker_build(
+                    dockerfile_path=remote_main_file_path,
+                    tag=image_tag,
+                    build_context=remote_dir
+                )
+                
+                if not build_result["success"]:
+                    return {
+                        "success": False,
+                        "output": build_result.get("output", ""),
+                        "error": f"Failed to build Docker image: {build_result.get('errors', '')}",
+                        "main_file": main_file,
+                        "execution_location": "remote",
+                        "remote_directory": remote_dir,
+                        "command": build_result.get("command", "")
+                    }
+                
+                # Now run the container
+                if action == "up" or action == "run":
+                    result = self.docker_run_container(
+                        image_name=image_tag,
+                        container_name=f"{image_tag}-container",
+                        detach=detach
+                    )
+                else:
+                    result = {
+                        "success": True,
+                        "output": build_result.get("output", ""),
+                        "errors": "",
+                        "command": build_result.get("command", "")
+                    }
+        else:
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Unknown Docker file type: {main_file}",
+                "main_file": main_file,
+                "execution_location": "remote"
+            }
+        
+        end_time = time.time()
+        
+        return {
+            "success": result.get("success", False),
+            "output": result.get("output", ""),
+            "error": result.get("errors", ""),
+            "main_file": main_file,
+            "execution_location": "remote",
+            "execution_time": end_time - start_time,
+            "remote_directory": remote_dir,
+            "command": result.get("command", ""),
+            "action": action
+        }
+
+    def get_python_overview(self):
+        """Get comprehensive Python environment information."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            overview_data = {}
+            
+            # Detect OS first to determine command strategy
+            remote_os_info = self.get_remote_os()
+            is_windows = remote_os_info.get("os", "").lower() == "windows"
+            
+            # Determine Python command priority based on OS
+            if is_windows:
+                python_commands = ["python", "python3", "py"]
+                pip_commands = ["pip", "pip3"]
+                which_cmd = "where"
+                null_redirect = ">nul 2>&1"
+            else:
+                python_commands = ["python3", "python"]
+                pip_commands = ["pip3", "pip"]
+                which_cmd = "which"
+                null_redirect = "2>/dev/null"
+            
+            # Get Python version - try commands in order
+            python_output = None
+            python_cmd = None
+            for cmd in python_commands:
+                output, errors = self.run_command(f"{cmd} --version", verbose=False)
+                if output and not errors:
+                    python_output = output.strip()
+                    python_cmd = cmd
+                    break
+                elif output and "python" in output.lower():
+                    python_output = output.strip()
+                    python_cmd = cmd
+                    break
+            
+            overview_data["python_version"] = python_output if python_output else "Not installed"
+            overview_data["python_command"] = python_cmd if python_cmd else "None"
+            
+            # Get pip version - try commands in order
+            pip_output = None
+            pip_cmd = None
+            for cmd in pip_commands:
+                output, errors = self.run_command(f"{cmd} --version", verbose=False)
+                if output and not errors:
+                    pip_output = output.strip()
+                    pip_cmd = cmd
+                    break
+                elif output and "pip" in output.lower():
+                    pip_output = output.strip()
+                    pip_cmd = cmd
+                    break
+            
+            overview_data["pip_version"] = pip_output if pip_output else "Not installed"
+            overview_data["pip_command"] = pip_cmd if pip_cmd else "None"
+            
+            # Get virtualenv info using the working Python command
+            if python_cmd:
+                venv_output, venv_errors = self.run_command(f"{python_cmd} -m venv --help", verbose=False)
+                overview_data["virtualenv_support"] = "Available" if venv_output and not venv_errors else "Not available"
+            else:
+                overview_data["virtualenv_support"] = "Not available"
+            
+            # Get installed packages count using the working pip command
+            if pip_cmd:
+                if is_windows:
+                    packages_output, packages_errors = self.run_command(f"{pip_cmd} list | find /c /v \"\"", verbose=False)
+                else:
+                    packages_output, packages_errors = self.run_command(f"{pip_cmd} list {null_redirect} | wc -l", verbose=False)
+                
+                try:
+                    if packages_output and packages_output.strip().isdigit():
+                        package_count = int(packages_output.strip()) - 2  # Subtract header lines
+                        overview_data["installed_packages"] = max(0, package_count)
+                    else:
+                        overview_data["installed_packages"] = "Unknown"
+                except:
+                    overview_data["installed_packages"] = "Unknown"
+            else:
+                overview_data["installed_packages"] = "Unknown"
+            
+            # Get Python executable path using the working Python command
+            if python_cmd:
+                if is_windows:
+                    python_path_output, python_path_errors = self.run_command(f"where {python_cmd}", verbose=False)
+                else:
+                    python_path_output, python_path_errors = self.run_command(f"which {python_cmd}", verbose=False)
+                overview_data["python_path"] = python_path_output.strip() if python_path_output else "Unknown"
+            else:
+                overview_data["python_path"] = "Unknown"
+            
+            # Get system architecture
+            if is_windows:
+                arch_output, arch_errors = self.run_command("echo %PROCESSOR_ARCHITECTURE%", verbose=False)
+            else:
+                arch_output, arch_errors = self.run_command("uname -m", verbose=False)
+            overview_data["architecture"] = arch_output.strip() if arch_output else "Unknown"
+            
+            return {
+                "success": True,
+                "overview": overview_data
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def get_ansible_overview(self):
+        """Get comprehensive Ansible environment information."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            overview_data = {}
+            
+            # Get Ansible version
+            ansible_output, ansible_errors = self.run_command("ansible --version", verbose=False)
+            if ansible_errors and "command not found" in ansible_errors.lower():
+                overview_data["ansible_version"] = "Not installed"
+                overview_data["ansible_core_version"] = "Not installed"
+                overview_data["config_file"] = "N/A"
+                overview_data["python_version"] = "N/A"
+                overview_data["executable_location"] = "N/A"
+            else:
+                lines = ansible_output.strip().split('\n') if ansible_output else []
+                overview_data["ansible_version"] = lines[0] if lines else "Unknown"
+                
+                # Parse additional info from ansible --version output
+                for line in lines:
+                    if "ansible core" in line.lower():
+                        overview_data["ansible_core_version"] = line.strip()
+                    elif "config file" in line.lower():
+                        overview_data["config_file"] = line.split('=')[1].strip() if '=' in line else "Default"
+                    elif "python version" in line.lower():
+                        overview_data["python_version"] = line.split('=')[1].strip() if '=' in line else "Unknown"
+                    elif "executable location" in line.lower():
+                        overview_data["executable_location"] = line.split('=')[1].strip() if '=' in line else "Unknown"
+            
+            # Get ansible-playbook version
+            playbook_output, playbook_errors = self.run_command("ansible-playbook --version", verbose=False)
+            overview_data["playbook_available"] = "Available" if playbook_output and not playbook_errors else "Not available"
+            
+            # Get ansible-galaxy info
+            galaxy_output, galaxy_errors = self.run_command("ansible-galaxy --version", verbose=False)
+            overview_data["galaxy_available"] = "Available" if galaxy_output and not galaxy_errors else "Not available"
+            
+            # Check for ansible-vault
+            vault_output, vault_errors = self.run_command("ansible-vault --help", verbose=False)
+            overview_data["vault_available"] = "Available" if vault_output and not vault_errors else "Not available"
+            
+            # Get installed collections count
+            collections_output, collections_errors = self.run_command("ansible-galaxy collection list 2>/dev/null | grep -c '^[a-zA-Z]'", verbose=False)
+            try:
+                collections_count = int(collections_output.strip()) if collections_output and collections_output.strip().isdigit() else 0
+                overview_data["installed_collections"] = collections_count
+            except:
+                overview_data["installed_collections"] = "Unknown"
+            
+            return {
+                "success": True,
+                "overview": overview_data
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def get_terraform_overview(self):
+        """Get comprehensive Terraform environment information."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            overview_data = {}
+            
+            # Get Terraform version
+            terraform_output, terraform_errors = self.run_command("terraform version", verbose=False)
+            if terraform_errors and "command not found" in terraform_errors.lower():
+                overview_data["terraform_version"] = "Not installed"
+                overview_data["platform"] = "N/A"
+                overview_data["provider_versions"] = {}
+            else:
+                lines = terraform_output.strip().split('\n') if terraform_output else []
+                overview_data["terraform_version"] = lines[0] if lines else "Unknown"
+                
+                # Parse platform info
+                for line in lines:
+                    if "on " in line.lower() and "terraform" in lines[0].lower():
+                        overview_data["platform"] = line.strip()
+                        break
+                else:
+                    overview_data["platform"] = "Unknown"
+                
+                # Parse provider versions
+                provider_versions = {}
+                for line in lines[1:]:
+                    if "provider" in line.lower():
+                        provider_versions[line.strip()] = "Installed"
+                overview_data["provider_versions"] = provider_versions
+            
+            # Get Terraform workspace info
+            workspace_output, workspace_errors = self.run_command("terraform workspace show 2>/dev/null", verbose=False)
+            overview_data["current_workspace"] = workspace_output.strip() if workspace_output else "default"
+            
+            # Check for Terraform Cloud CLI
+            tfc_output, tfc_errors = self.run_command("terraform login --help", verbose=False)
+            overview_data["cloud_cli_available"] = "Available" if tfc_output and not tfc_errors else "Not available"
+            
+            # Get system architecture
+            arch_output, arch_errors = self.run_command("uname -m", verbose=False)
+            overview_data["architecture"] = arch_output.strip() if arch_output else "Unknown"
+            
+            # Check for common Terraform tools
+            tools_status = {}
+            for tool in ["terragrunt", "tflint", "terraform-docs", "checkov"]:
+                tool_output, tool_errors = self.run_command(f"which {tool}", verbose=False)
+                tools_status[tool] = "Available" if tool_output and not tool_errors else "Not available"
+            
+            overview_data["additional_tools"] = tools_status
+            
+            return {
+                "success": True,
+                "overview": overview_data
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def get_machine_os_info(self):
+        """Get comprehensive OS information for machine management."""
+        if not self.client:
+            print("Connection not established. Call login() first.")
+            return {"success": False, "error": "No connection"}
+        
+        try:
+            os_data = {}
+            
+            # Get OS information
+            remote_os = self.get_remote_os()
+            os_data["os_type"] = remote_os.get("os", "Unknown")
+            
+            if os_data["os_type"] == "linux":
+                # Get distribution info
+                distro_output, distro_errors = self.run_command("cat /etc/os-release 2>/dev/null || lsb_release -d 2>/dev/null || echo 'PRETTY_NAME=\"Unknown Linux\"'", verbose=False)
+                if distro_output:
+                    for line in distro_output.split('\n'):
+                        if line.startswith('PRETTY_NAME='):
+                            os_data["distribution"] = line.split('=')[1].strip('"')
+                            break
+                        elif line.startswith('Description:'):
+                            os_data["distribution"] = line.split(':', 1)[1].strip()
+                            break
+                    else:
+                        # Try alternative methods
+                        fallback_output, _ = self.run_command("uname -o 2>/dev/null || echo 'Linux'", verbose=False)
+                        os_data["distribution"] = fallback_output.strip() if fallback_output else "Unknown Linux"
+                else:
+                    os_data["distribution"] = "Unknown Linux"
+                
+                # Get kernel version
+                kernel_output, kernel_errors = self.run_command("uname -r", verbose=False)
+                os_data["kernel_version"] = kernel_output.strip() if kernel_output else "Unknown"
+                
+                # Get uptime
+                uptime_output, uptime_errors = self.run_command("uptime -p 2>/dev/null || uptime | awk '{print $3\" \"$4}' | sed 's/,//'", verbose=False)
+                os_data["uptime"] = uptime_output.strip() if uptime_output else "Unknown"
+                
+                # Get memory info - handle different formats
+                mem_output, mem_errors = self.run_command("free -h 2>/dev/null | grep -E '^Mem:' || free | grep -E '^Mem:'", verbose=False)
+                if mem_output:
+                    # Parse the free command output
+                    # Format: Mem: total used free shared buff/cache available
+                    parts = mem_output.strip().split()
+                    if len(parts) >= 2:
+                        total_mem = parts[1]
+                        # If it's in bytes, convert to GB
+                        if total_mem.isdigit():
+                            gb_mem = round(int(total_mem) / (1024**3), 2)
+                            os_data["total_memory"] = f"{gb_mem}GB"
+                        else:
+                            os_data["total_memory"] = total_mem
+                    else:
+                        os_data["total_memory"] = "Unknown"
+                else:
+                    os_data["total_memory"] = "Unknown"
+                
+            elif os_data["os_type"] == "windows":
+                # Initialize Windows-specific fields with defaults
+                os_data["distribution"] = "Unknown Windows"
+                os_data["kernel_version"] = "Unknown"
+                os_data["uptime"] = "Unknown"
+                os_data["total_memory"] = "Unknown"
+                
+                # Get Windows version - try systeminfo first, then ver as fallback
+                version_output, version_errors = self.run_command('systeminfo | findstr /B /C:"OS Name" /C:"OS Version"', verbose=False)
+                
+                if not version_output or "not recognized" in str(version_errors).lower():
+                    # Fallback to ver command
+                    version_output, version_errors = self.run_command('ver', verbose=False)
+                
+                if version_output:
+                    lines = version_output.split('\n')
+                    distribution_found = False
+                    
+                    # Look for OS Name and OS Version from systeminfo
+                    for line in lines:
+                        line = line.strip()
+                        if "OS Name" in line and ":" in line:
+                            os_name = line.split(':', 1)[1].strip()
+                            if os_name and os_name != "":
+                                os_data["distribution"] = os_name
+                                distribution_found = True
+                        elif "OS Version" in line and ":" in line:
+                            os_version = line.split(':', 1)[1].strip()
+                            if os_version and os_version != "":
+                                os_data["kernel_version"] = os_version
+                    
+                    # If systeminfo didn't provide OS Name, try to parse ver command output
+                    if not distribution_found:
+                        for line in lines:
+                            line = line.strip()
+                            if ("Microsoft Windows" in line or "Windows" in line) and line != "":
+                                # Clean up ver command output - remove version info in brackets
+                                if "[Version" in line:
+                                    # Extract Windows name part before [Version...]
+                                    windows_part = line.split("[Version")[0].strip()
+                                    if windows_part:
+                                        os_data["distribution"] = windows_part
+                                        distribution_found = True
+                                        # Extract version from bracket if available
+                                        if ":" in line and "[Version" in line:
+                                            version_part = line.split("[Version")[1].strip("]")
+                                            if version_part:
+                                                os_data["kernel_version"] = version_part
+                                else:
+                                    os_data["distribution"] = line
+                                    distribution_found = True
+                                break
+                    
+                    # If still no distribution found, use the raw output as fallback
+                    if not distribution_found and version_output.strip():
+                        clean_output = version_output.strip().split('\n')[0].strip()
+                        if clean_output and clean_output != "":
+                            os_data["distribution"] = clean_output
+                
+                # Get uptime
+                uptime_output, uptime_errors = self.run_command("systeminfo | findstr /B /C:\"System Boot Time\" /C:\"System Up Time\" 2>nul || echo \"Unknown\"", verbose=False)
+                if uptime_output and "Unknown" not in uptime_output:
+                    for line in uptime_output.split('\n'):
+                        if "System Boot Time" in line or "System Up Time" in line:
+                            os_data["uptime"] = line.split(':', 1)[1].strip() if ':' in line else "Unknown"
+                            break
+                    else:
+                        os_data["uptime"] = "Unknown"
+                else:
+                    os_data["uptime"] = "Unknown"
+                
+                # Get memory info - try multiple methods
+                mem_output, mem_errors = self.run_command("wmic computersystem get TotalPhysicalMemory /value 2>nul || systeminfo | findstr /C:\"Total Physical Memory\"", verbose=False)
+                if mem_output:
+                    if "TotalPhysicalMemory=" in mem_output:
+                        try:
+                            bytes_mem = int(mem_output.split('=')[1].strip())
+                            gb_mem = round(bytes_mem / (1024**3), 2)
+                            os_data["total_memory"] = f"{gb_mem}GB"
+                        except:
+                            os_data["total_memory"] = "Unknown"
+                    elif "Total Physical Memory" in mem_output:
+                        # Parse systeminfo output
+                        for line in mem_output.split('\n'):
+                            if "Total Physical Memory" in line:
+                                mem_str = line.split(':', 1)[1].strip() if ':' in line else "Unknown"
+                                os_data["total_memory"] = mem_str
+                                break
+                        else:
+                            os_data["total_memory"] = "Unknown"
+                    else:
+                        os_data["total_memory"] = "Unknown"
+                else:
+                    os_data["total_memory"] = "Unknown"
+                    
+            else:
+                # Unknown OS - try generic commands
+                os_data["distribution"] = "Unknown"
+                os_data["kernel_version"] = "Unknown"
+                os_data["uptime"] = "Unknown"
+                os_data["total_memory"] = "Unknown"
+            
+            # Get architecture
+            if os_data["os_type"] == "linux":
+                arch_output, arch_errors = self.run_command("uname -m", verbose=False)
+            elif os_data["os_type"] == "windows":
+                arch_output, arch_errors = self.run_command("echo %PROCESSOR_ARCHITECTURE% 2>nul || wmic os get osarchitecture /value", verbose=False)
+                if arch_output and "OSArchitecture=" in arch_output:
+                    arch_output = arch_output.split('=')[1].strip()
+            else:
+                arch_output, arch_errors = self.run_command("uname -m 2>/dev/null || echo Unknown", verbose=False)
+            
+            os_data["architecture"] = arch_output.strip() if arch_output else "Unknown"
+            
+            return {
+                "success": True,
+                "os_info": os_data
             }
         except Exception as e:
             return {"success": False, "error": str(e)}

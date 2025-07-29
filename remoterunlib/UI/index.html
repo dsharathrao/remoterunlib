@@ -15,6 +15,9 @@
 </head>
 
 <body>
+    <!-- Notification Container -->
+    <div id="notification-container" class="notification-container"></div>
+
     <div class="app-container">
         <!-- Sidebar Navigation -->
         <nav class="sidebar">
@@ -104,6 +107,15 @@
                                 <p>Last 24h Executions</p>
                             </div>
                         </div>
+                        <div class="stat-card">
+                            <div class="stat-icon running">
+                                <i class="fas fa-spinner"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="running-executions">0</h3>
+                                <p>Running Now</p>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Filters and Controls -->
@@ -133,9 +145,11 @@
                             </select>
                         </div>
                         <div class="filter-group">
-                            <button class="btn btn-secondary" id="refresh-dashboard-btn">
-                                <i class="fas fa-sync-alt"></i> Refresh
-                            </button>
+                            <div class="action-buttons">
+                                <button class="btn btn-secondary" id="refresh-dashboard-btn">
+                                    <i class="fas fa-sync-alt"></i> Refresh
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -242,25 +256,45 @@
                     </div>
                     <div class="file-upload-section">
                         <div class="upload-tabs">
-                            <button class="tab-btn active" data-tab="upload">Upload File</button>
+                            <button class="tab-btn active" data-tab="overview-python">Overview</button>
+                            <button class="tab-btn" data-tab="upload">Upload File</button>
                             <button class="tab-btn" data-tab="existing">Existing Files</button>
                             <button class="tab-btn" data-tab="directories-python">Project Directories</button>
                             <button class="tab-btn" data-tab="editor">Script Editor</button>
                         </div>
                         <div class="tab-content">
-                            <div id="upload-tab" class="tab-pane active">
+                            <!-- Overview Tab -->
+                            <div id="overview-python-tab" class="tab-pane active">
+                                <div class="overview-container">
+                                    <div class="overview-header">
+                                        <h3><i class="fab fa-python"></i> Python Environment Overview</h3>
+                                        <button id="refresh-python-overview-btn" class="btn btn-secondary">
+                                            <i class="fas fa-sync-alt"></i> Refresh
+                                        </button>
+                                    </div>
+                                    <div id="python-overview-content" class="overview-content">
+                                        <div class="info-placeholder">
+                                            <i class="fab fa-python"></i>
+                                            <p>Select a machine to view Python environment information</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="upload-tab" class="tab-pane">`
                                 <div class="drop-zone" id="python-drop-zone">
                                     <i class="fas fa-cloud-upload-alt"></i>
                                     <p>Drag & drop Python files here or click to browse</p>
                                     <input type="file" id="python-file-input" accept=".py" multiple hidden>
                                 </div>
                                 <div class="tab-actions">
-                                    <button class="btn btn-success" id="run-python-upload-btn">
-                                        <i class="fas fa-play"></i> Run
-                                    </button>
-                                    <button class="btn btn-secondary" id="clear-python-upload-btn">
-                                        <i class="fas fa-eraser"></i> Clear
-                                    </button>
+                                    <div class="action-buttons">
+                                        <button class="btn btn-success" id="run-python-upload-btn">
+                                            <i class="fas fa-play"></i> Run
+                                        </button>
+                                        <button class="btn btn-secondary" id="clear-python-upload-btn">
+                                            <i class="fas fa-eraser"></i> Clear
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                             <div id="existing-tab" class="tab-pane">
@@ -289,15 +323,18 @@
                                             <h5 id="python-current-directory">Directory: </h5>
                                             <div class="directory-controls">
                                                 <input type="file" id="python-dir-file-input" multiple hidden>
-                                                <button class="btn btn-sm btn-secondary" id="python-upload-to-dir-btn">
-                                                    <i class="fas fa-upload"></i> Upload Files
-                                                </button>
-                                                <button class="btn btn-sm btn-info" id="python-refresh-dir-btn">
-                                                    <i class="fas fa-sync"></i> Refresh
-                                                </button>
-                                                <button class="btn btn-sm btn-warning" id="python-close-dir-btn">
-                                                    <i class="fas fa-times"></i> Close
-                                                </button>
+                                                <div class="action-buttons">
+                                                    <button class="btn btn-sm btn-secondary"
+                                                        id="python-upload-to-dir-btn">
+                                                        <i class="fas fa-upload"></i> Upload Files
+                                                    </button>
+                                                    <button class="btn btn-sm btn-info" id="python-refresh-dir-btn">
+                                                        <i class="fas fa-sync"></i> Refresh
+                                                    </button>
+                                                    <button class="btn btn-sm btn-warning" id="python-close-dir-btn">
+                                                        <i class="fas fa-times"></i> Close
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                         <div class="directory-files" id="python-directory-files">
@@ -395,15 +432,22 @@
                                 <div class="editor-actions">
                                     <input type="text" id="python-filename" class="form-control"
                                         placeholder="script_name.py">
-                                    <button class="btn btn-primary" id="save-python-btn">
-                                        <i class="fas fa-save"></i> Save
-                                    </button>
-                                    <button class="btn btn-success" id="run-python-editor-btn">
-                                        <i class="fas fa-play"></i> Run
-                                    </button>
-                                    <button class="btn btn-secondary" id="clear-python-editor-btn">
-                                        <i class="fas fa-eraser"></i> Clear
-                                    </button>
+                                    <div class="timeout-control">
+                                        <label for="python-timeout">Timeout (seconds):</label>
+                                        <input type="number" id="python-timeout" class="form-control" value="60" min="1"
+                                            max="3600" placeholder="60">
+                                    </div>
+                                    <div class="action-buttons">
+                                        <button class="btn btn-primary" id="save-python-btn">
+                                            <i class="fas fa-save"></i> Save
+                                        </button>
+                                        <button class="btn btn-success" id="run-python-editor-btn">
+                                            <i class="fas fa-play"></i> Run
+                                        </button>
+                                        <button class="btn btn-secondary" id="clear-python-editor-btn">
+                                            <i class="fas fa-eraser"></i> Clear
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -458,270 +502,332 @@
                             <option value="">Choose a machine...</option>
                         </select>
                     </div>
-                    <div class="ansible-mode-toggle">
-                        <button class="mode-btn active" data-mode="adhoc">Ad-hoc Command</button>
-                        <button class="mode-btn" data-mode="playbook">Playbook</button>
-                    </div>
-                    <div id="adhoc-mode" class="mode-content active">
-                        <div class="form-group">
-                            <label for="ansible-module">Module:</label>
-                            <select id="ansible-module" class="form-control">
-                                <option value="command">command</option>
-                                <option value="shell">shell</option>
-                                <option value="copy">copy</option>
-                                <option value="file">file</option>
-                                <option value="service">service</option>
-                                <option value="yum">yum</option>
-                                <option value="apt">apt</option>
-                            </select>
+                    <div class="file-upload-section">
+                        <div class="upload-tabs">
+                            <button class="tab-btn active" data-tab="overview-ansible">Overview</button>
+                            <button class="tab-btn" data-tab="adhoc-ansible">Ad-hoc Command</button>
+                            <button class="tab-btn" data-tab="playbook-ansible">Playbook</button>
                         </div>
-                        <div class="form-group">
-                            <label for="ansible-args">Arguments:</label>
-                            <textarea id="ansible-args" class="form-control" placeholder="Module arguments..."
-                                rows="3"></textarea>
-                        </div>
-                        <div class="privilege-control" id="ansible-adhoc-privilege-control">
-                            <label class="privilege-checkbox">
-                                <input type="checkbox" id="ansible-adhoc-become" class="form-check-input">
-                                <span class="checkmark"></span>
-                                <div class="privilege-label">
-                                    <i class="fas fa-user-shield privilege-icon"></i>
-                                    <div>
-                                        <div class="privilege-text">Become (as root)</div>
-                                        <div class="privilege-description">Execute with elevated privileges</div>
+                        <div class="tab-content">
+                            <!-- Overview Tab -->
+                            <div id="overview-ansible-tab" class="tab-pane active">
+                                <div class="overview-container">
+                                    <div class="overview-header">
+                                        <h3><i class="fas fa-cogs"></i> Ansible Environment Overview</h3>
+                                        <button id="refresh-ansible-overview-btn" class="btn btn-secondary">
+                                            <i class="fas fa-sync-alt"></i> Refresh
+                                        </button>
+                                    </div>
+                                    <div id="ansible-overview-content" class="overview-content">
+                                        <div class="info-placeholder">
+                                            <i class="fas fa-cogs"></i>
+                                            <p>Select a machine to view Ansible environment information</p>
+                                        </div>
                                     </div>
                                 </div>
-                            </label>
-                            <div class="privilege-status">ELEVATED</div>
-                            <div class="privilege-warning">
-                                <i class="fas fa-exclamation-triangle"></i>
-                                Commands will run with root privileges
                             </div>
-                        </div>
-                        <div class="tab-actions">
-                            <button class="btn btn-success" id="run-ansible-adhoc-btn">
-                                <i class="fas fa-play"></i> Run
-                            </button>
-                            <button class="btn btn-secondary" id="clear-ansible-adhoc-btn">
-                                <i class="fas fa-eraser"></i> Clear
-                            </button>
-                        </div>
-                    </div>
-                    <div id="playbook-mode" class="mode-content">
-                        <div class="file-upload-section">
-                            <div class="upload-tabs">
-                                <button class="tab-btn active" data-tab="upload-ansible">Upload Playbook</button>
-                                <button class="tab-btn" data-tab="existing-ansible">Existing Playbooks</button>
-                                <button class="tab-btn" data-tab="directories-ansible">Project Directories</button>
-                                <button class="tab-btn" data-tab="editor-ansible">Playbook Editor</button>
-                            </div>
-                            <div class="tab-content">
-                                <div id="upload-ansible-tab" class="tab-pane active">
-                                    <div class="drop-zone" id="ansible-drop-zone">
-                                        <i class="fas fa-cloud-upload-alt"></i>
-                                        <p>Drag & drop Ansible playbooks here or click to browse</p>
-                                        <input type="file" id="ansible-file-input" accept=".yml,.yaml" multiple hidden>
+                            <!-- Ad-hoc Command Tab -->
+                            <div id="adhoc-ansible-tab" class="tab-pane">
+                                <div id="adhoc-mode" class="mode-content">
+                                    <div class="form-group">
+                                        <label for="ansible-module">Module:</label>
+                                        <select id="ansible-module" class="form-control">
+                                            <option value="command">command</option>
+                                            <option value="shell">shell</option>
+                                            <option value="copy">copy</option>
+                                            <option value="file">file</option>
+                                            <option value="service">service</option>
+                                            <option value="yum">yum</option>
+                                            <option value="apt">apt</option>
+                                        </select>
                                     </div>
-                                    <div class="privilege-control" id="ansible-upload-privilege-control">
+                                    <div class="form-group">
+                                        <label for="ansible-args">Arguments:</label>
+                                        <textarea id="ansible-args" class="form-control"
+                                            placeholder="Module arguments..." rows="3"></textarea>
+                                    </div>
+                                    <div class="privilege-control" id="ansible-adhoc-privilege-control">
                                         <label class="privilege-checkbox">
-                                            <input type="checkbox" id="ansible-upload-become" class="form-check-input">
+                                            <input type="checkbox" id="ansible-adhoc-become" class="form-check-input">
                                             <span class="checkmark"></span>
                                             <div class="privilege-label">
                                                 <i class="fas fa-user-shield privilege-icon"></i>
                                                 <div>
                                                     <div class="privilege-text">Become (as root)</div>
-                                                    <div class="privilege-description">Execute playbook with elevated
-                                                        privileges</div>
+                                                    <div class="privilege-description">Execute with elevated privileges
+                                                    </div>
                                                 </div>
                                             </div>
                                         </label>
                                         <div class="privilege-status">ELEVATED</div>
                                         <div class="privilege-warning">
                                             <i class="fas fa-exclamation-triangle"></i>
-                                            Playbook will run with root privileges
+                                            Commands will run with root privileges
                                         </div>
                                     </div>
                                     <div class="tab-actions">
-                                        <button class="btn btn-success" id="run-ansible-upload-btn">
+                                        <button class="btn btn-success" id="run-ansible-adhoc-btn">
                                             <i class="fas fa-play"></i> Run
                                         </button>
-                                        <button class="btn btn-secondary" id="clear-ansible-upload-btn">
+                                        <button class="btn btn-secondary" id="clear-ansible-adhoc-btn">
                                             <i class="fas fa-eraser"></i> Clear
                                         </button>
                                     </div>
-                                </div>
-                                <div id="existing-ansible-tab" class="tab-pane">
-                                    <div class="file-list" id="ansible-file-list">
-                                        <!-- Existing playbooks will be listed here -->
-                                    </div>
-                                </div>
-                                <div id="directories-ansible-tab" class="tab-pane">
-                                    <div class="directory-management">
-                                        <div class="directory-header">
-                                            <h4><i class="fas fa-folder-plus"></i> Project Directory Management</h4>
-                                            <div class="directory-actions">
-                                                <input type="text" id="ansible-new-dir-name" class="form-control"
-                                                    placeholder="Enter directory name..."
-                                                    style="display: inline-block; width: 200px; margin-right: 10px;">
-                                                <button class="btn btn-primary" id="create-ansible-dir-btn">
-                                                    <i class="fas fa-plus"></i> Create Directory
-                                                </button>
+                                    <!-- Playbook Tab -->
+                                    <div id="playbook-ansible-tab" class="tab-pane">
+                                        <div class="file-upload-section">
+                                            <div class="upload-tabs">
+                                                <button class="tab-btn active" data-tab="upload-ansible">Upload
+                                                    Playbook</button>
+                                                <button class="tab-btn" data-tab="existing-ansible">Existing
+                                                    Playbooks</button>
+                                                <button class="tab-btn" data-tab="directories-ansible">Project
+                                                    Directories</button>
+                                                <button class="tab-btn" data-tab="editor-ansible">Playbook
+                                                    Editor</button>
                                             </div>
-                                        </div>
-                                        <div class="directories-grid" id="ansible-directories-grid">
-                                            <!-- Directories will be listed here -->
-                                        </div>
-                                        <div class="directory-details" id="ansible-directory-details"
-                                            style="display: none;">
-                                            <div class="directory-details-header">
-                                                <h5 id="ansible-current-directory">Directory: </h5>
-                                                <div class="directory-controls">
-                                                    <input type="file" id="ansible-dir-file-input" multiple hidden>
-                                                    <button class="btn btn-sm btn-secondary"
-                                                        id="ansible-upload-to-dir-btn">
-                                                        <i class="fas fa-upload"></i> Upload Files
-                                                    </button>
-                                                    <button class="btn btn-sm btn-info" id="ansible-refresh-dir-btn">
-                                                        <i class="fas fa-sync"></i> Refresh
-                                                    </button>
-                                                    <button class="btn btn-sm btn-warning" id="ansible-close-dir-btn">
-                                                        <i class="fas fa-times"></i> Close
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            <div class="directory-files" id="ansible-directory-files">
-                                                <!-- Directory files will be listed here -->
-                                            </div>
-                                            <div class="directory-execution">
-                                                <h6><i class="fas fa-cogs"></i> Ansible Project Execution</h6>
-                                                <div class="project-execution-mode">
-                                                    <div class="execution-info">
-                                                        <div class="execution-note">
-                                                            <i class="fas fa-info-circle"></i>
-                                                            <span>Ansible runs locally targeting the selected remote
-                                                                machine</span>
+                                            <div class="tab-content">
+                                                <div id="upload-ansible-tab" class="tab-pane active">
+                                                    <div class="drop-zone" id="ansible-drop-zone">
+                                                        <i class="fas fa-cloud-upload-alt"></i>
+                                                        <p>Drag & drop Ansible playbooks here or click to browse</p>
+                                                        <input type="file" id="ansible-file-input" accept=".yml,.yaml"
+                                                            multiple hidden>
+                                                    </div>
+                                                    <div class="privilege-control"
+                                                        id="ansible-upload-privilege-control">
+                                                        <label class="privilege-checkbox">
+                                                            <input type="checkbox" id="ansible-upload-become"
+                                                                class="form-check-input">
+                                                            <span class="checkmark"></span>
+                                                            <div class="privilege-label">
+                                                                <i class="fas fa-user-shield privilege-icon"></i>
+                                                                <div>
+                                                                    <div class="privilege-text">Become (as root)</div>
+                                                                    <div class="privilege-description">Execute playbook
+                                                                        with elevated
+                                                                        privileges</div>
+                                                                </div>
+                                                            </div>
+                                                        </label>
+                                                        <div class="privilege-status">ELEVATED</div>
+                                                        <div class="privilege-warning">
+                                                            <i class="fas fa-exclamation-triangle"></i>
+                                                            Playbook will run with root privileges
                                                         </div>
                                                     </div>
-                                                    <div class="main-file-selection">
-                                                        <label class="form-label">Main Playbook:</label>
-                                                        <div class="main-file-controls">
-                                                            <select id="ansible-main-file" class="form-control"
-                                                                style="width: 200px;">
-                                                                <option value="">Auto-detect playbook...</option>
-                                                            </select>
-                                                            <button class="btn btn-sm btn-info"
-                                                                id="ansible-detect-main-btn">
-                                                                <i class="fas fa-search"></i> Detect
+                                                    <div class="tab-actions">
+                                                        <div class="action-buttons">
+                                                            <button class="btn btn-success" id="run-ansible-upload-btn">
+                                                                <i class="fas fa-play"></i> Run
+                                                            </button>
+                                                            <button class="btn btn-secondary"
+                                                                id="clear-ansible-upload-btn">
+                                                                <i class="fas fa-eraser"></i> Clear
                                                             </button>
                                                         </div>
                                                     </div>
-                                                    <div class="execution-options">
-                                                        <div class="command-options">
-                                                            <label class="form-label">Execution Options:</label>
-                                                            <div class="command-controls">
-                                                                <select id="ansible-command-type" class="form-control"
-                                                                    style="width: 150px;">
-                                                                    <option value="default">Default Playbook</option>
-                                                                    <option value="custom">Custom Command</option>
-                                                                </select>
-                                                                <input type="text" id="ansible-custom-full-command"
+                                                </div>
+                                                <div id="existing-ansible-tab" class="tab-pane">
+                                                    <div class="file-list" id="ansible-file-list">
+                                                        <!-- Existing playbooks will be listed here -->
+                                                    </div>
+                                                </div>
+                                                <div id="directories-ansible-tab" class="tab-pane">
+                                                    <div class="directory-management">
+                                                        <div class="directory-header">
+                                                            <h4><i class="fas fa-folder-plus"></i> Project Directory
+                                                                Management</h4>
+                                                            <div class="directory-actions">
+                                                                <input type="text" id="ansible-new-dir-name"
                                                                     class="form-control"
-                                                                    placeholder="e.g., ansible-playbook playbook.yml -v"
-                                                                    style="width: 300px; display: none;">
-                                                                <input type="text" id="ansible-extra-args"
-                                                                    class="form-control"
-                                                                    placeholder="Extra vars or options (optional)"
-                                                                    style="width: 200px;">
+                                                                    placeholder="Enter directory name..."
+                                                                    style="display: inline-block; width: 200px; margin-right: 10px;">
+                                                                <button class="btn btn-primary"
+                                                                    id="create-ansible-dir-btn">
+                                                                    <i class="fas fa-plus"></i> Create Directory
+                                                                </button>
                                                             </div>
                                                         </div>
-                                                        <div class="ansible-privilege-control">
-                                                            <label class="privilege-option">
-                                                                <input type="checkbox" id="ansible-project-become">
-                                                                <span class="privilege-label">
-                                                                    <i class="fas fa-user-shield"></i>
-                                                                    <span class="privilege-text">Become (sudo)</span>
-                                                                </span>
-                                                            </label>
+                                                        <div class="directories-grid" id="ansible-directories-grid">
+                                                            <!-- Directories will be listed here -->
                                                         </div>
-                                                        <button class="btn btn-success"
-                                                            id="ansible-execute-project-btn">
-                                                            <i class="fas fa-play"></i> Execute Project
-                                                        </button>
+                                                        <div class="directory-details" id="ansible-directory-details"
+                                                            style="display: none;">
+                                                            <div class="directory-details-header">
+                                                                <h5 id="ansible-current-directory">Directory: </h5>
+                                                                <div class="directory-controls">
+                                                                    <input type="file" id="ansible-dir-file-input"
+                                                                        multiple hidden>
+                                                                    <div class="action-buttons">
+                                                                        <button class="btn btn-sm btn-secondary"
+                                                                            id="ansible-upload-to-dir-btn">
+                                                                            <i class="fas fa-upload"></i> Upload Files
+                                                                        </button>
+                                                                        <button class="btn btn-sm btn-info"
+                                                                            id="ansible-refresh-dir-btn">
+                                                                            <i class="fas fa-sync"></i> Refresh
+                                                                        </button>
+                                                                        <button class="btn btn-sm btn-warning"
+                                                                            id="ansible-close-dir-btn">
+                                                                            <i class="fas fa-times"></i> Close
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="directory-files" id="ansible-directory-files">
+                                                                <!-- Directory files will be listed here -->
+                                                            </div>
+                                                            <div class="directory-execution">
+                                                                <h6><i class="fas fa-cogs"></i> Ansible Project
+                                                                    Execution</h6>
+                                                                <div class="project-execution-mode">
+                                                                    <div class="execution-info">
+                                                                        <div class="execution-note">
+                                                                            <i class="fas fa-info-circle"></i>
+                                                                            <span>Ansible runs locally targeting the
+                                                                                selected remote
+                                                                                machine</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div class="main-file-selection">
+                                                                        <label class="form-label">Main Playbook:</label>
+                                                                        <div class="main-file-controls">
+                                                                            <select id="ansible-main-file"
+                                                                                class="form-control"
+                                                                                style="width: 200px;">
+                                                                                <option value="">Auto-detect playbook...
+                                                                                </option>
+                                                                            </select>
+                                                                            <button class="btn btn-sm btn-info"
+                                                                                id="ansible-detect-main-btn">
+                                                                                <i class="fas fa-search"></i> Detect
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div class="execution-options">
+                                                                        <div class="command-options">
+                                                                            <label class="form-label">Execution
+                                                                                Options:</label>
+                                                                            <div class="command-controls">
+                                                                                <select id="ansible-command-type"
+                                                                                    class="form-control"
+                                                                                    style="width: 150px;">
+                                                                                    <option value="default">Default
+                                                                                        Playbook</option>
+                                                                                    <option value="custom">Custom
+                                                                                        Command</option>
+                                                                                </select>
+                                                                                <input type="text"
+                                                                                    id="ansible-custom-full-command"
+                                                                                    class="form-control"
+                                                                                    placeholder="e.g., ansible-playbook playbook.yml -v"
+                                                                                    style="width: 300px; display: none;">
+                                                                                <input type="text"
+                                                                                    id="ansible-extra-args"
+                                                                                    class="form-control"
+                                                                                    placeholder="Extra vars or options (optional)"
+                                                                                    style="width: 200px;">
+                                                                            </div>
+                                                                        </div>
+                                                                        <div class="ansible-privilege-control">
+                                                                            <label class="privilege-option">
+                                                                                <input type="checkbox"
+                                                                                    id="ansible-project-become">
+                                                                                <span class="privilege-label">
+                                                                                    <i class="fas fa-user-shield"></i>
+                                                                                    <span class="privilege-text">Become
+                                                                                        (sudo)</span>
+                                                                                </span>
+                                                                            </label>
+                                                                        </div>
+                                                                        <button class="btn btn-success"
+                                                                            id="ansible-execute-project-btn">
+                                                                            <i class="fas fa-play"></i> Execute Project
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="execution-status"
+                                                                    id="ansible-execution-status"
+                                                                    style="display: none;">
+                                                                    <div class="status-indicator">
+                                                                        <i class="fas fa-spinner fa-spin"></i>
+                                                                        <span>Executing Ansible project...</span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 </div>
-                                                <div class="execution-status" id="ansible-execution-status"
-                                                    style="display: none;">
-                                                    <div class="status-indicator">
-                                                        <i class="fas fa-spinner fa-spin"></i>
-                                                        <span>Executing Ansible project...</span>
+                                                <div id="editor-ansible-tab" class="tab-pane">
+                                                    <div class="code-editor-container">
+                                                        <div class="editor-header">
+                                                            <div class="editor-tabs">
+                                                                <div class="editor-tab active">
+                                                                    <i class="fas fa-file-code"></i>
+                                                                    <span id="ansible-tab-name">playbook.yml</span>
+                                                                    <button class="tab-close">×</button>
+                                                                </div>
+                                                            </div>
+                                                            <div class="editor-controls">
+                                                                <button class="editor-btn" title="Format YAML"><i
+                                                                        class="fas fa-magic"></i></button>
+                                                                <button class="editor-btn" title="Validate YAML"><i
+                                                                        class="fas fa-check"></i></button>
+                                                            </div>
+                                                        </div>
+                                                        <div class="code-editor-wrapper">
+                                                            <div class="line-numbers" id="ansible-line-numbers"></div>
+                                                            <textarea id="ansible-editor" class="code-editor"
+                                                                placeholder="# Write your Ansible playbook YAML here..."
+                                                                spellcheck="false"></textarea>
+                                                        </div>
+                                                    </div>
+                                                    <div class="editor-actions">
+                                                        <input type="text" id="ansible-filename" class="form-control"
+                                                            placeholder="playbook.yml">
+                                                        <div class="privilege-control"
+                                                            id="ansible-editor-privilege-control">
+                                                            <label class="privilege-checkbox">
+                                                                <input type="checkbox" id="ansible-editor-become"
+                                                                    class="form-check-input">
+                                                                <span class="checkmark"></span>
+                                                                <div class="privilege-label">
+                                                                    <i class="fas fa-user-shield privilege-icon"></i>
+                                                                    <div>
+                                                                        <div class="privilege-text">Become (as root)
+                                                                        </div>
+                                                                        <div class="privilege-description">Execute with
+                                                                            elevated
+                                                                            privileges</div>
+                                                                    </div>
+                                                                </div>
+                                                            </label>
+                                                            <div class="privilege-status">ELEVATED</div>
+                                                            <div class="privilege-warning">
+                                                                <i class="fas fa-exclamation-triangle"></i>
+                                                                Playbook will run with root privileges
+                                                            </div>
+                                                        </div>
+                                                        <div class="action-buttons">
+                                                            <button class="btn btn-primary"
+                                                                id="save-ansible-editor-btn">
+                                                                <i class="fas fa-save"></i> Save
+                                                            </button>
+                                                            <button class="btn btn-success" id="run-ansible-editor-btn">
+                                                                <i class="fas fa-play"></i> Run
+                                                            </button>
+                                                            <button class="btn btn-secondary"
+                                                                id="clear-ansible-editor-btn">
+                                                                <i class="fas fa-eraser"></i> Clear
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-                                <div id="editor-ansible-tab" class="tab-pane">
-                                    <div class="code-editor-container">
-                                        <div class="editor-header">
-                                            <div class="editor-tabs">
-                                                <div class="editor-tab active">
-                                                    <i class="fas fa-file-code"></i>
-                                                    <span id="ansible-tab-name">playbook.yml</span>
-                                                    <button class="tab-close">×</button>
-                                                </div>
-                                            </div>
-                                            <div class="editor-controls">
-                                                <button class="editor-btn" title="Format YAML"><i
-                                                        class="fas fa-magic"></i></button>
-                                                <button class="editor-btn" title="Validate YAML"><i
-                                                        class="fas fa-check"></i></button>
-                                            </div>
-                                        </div>
-                                        <div class="code-editor-wrapper">
-                                            <div class="line-numbers" id="ansible-line-numbers"></div>
-                                            <textarea id="ansible-editor" class="code-editor"
-                                                placeholder="# Write your Ansible playbook YAML here..."
-                                                spellcheck="false"></textarea>
-                                        </div>
-                                    </div>
-                                    <div class="editor-actions">
-                                        <input type="text" id="ansible-filename" class="form-control"
-                                            placeholder="playbook.yml">
-                                        <div class="privilege-control" id="ansible-editor-privilege-control">
-                                            <label class="privilege-checkbox">
-                                                <input type="checkbox" id="ansible-editor-become"
-                                                    class="form-check-input">
-                                                <span class="checkmark"></span>
-                                                <div class="privilege-label">
-                                                    <i class="fas fa-user-shield privilege-icon"></i>
-                                                    <div>
-                                                        <div class="privilege-text">Become (as root)</div>
-                                                        <div class="privilege-description">Execute with elevated
-                                                            privileges</div>
-                                                    </div>
-                                                </div>
-                                            </label>
-                                            <div class="privilege-status">ELEVATED</div>
-                                            <div class="privilege-warning">
-                                                <i class="fas fa-exclamation-triangle"></i>
-                                                Playbook will run with root privileges
-                                            </div>
-                                        </div>
-                                        <button class="btn btn-primary" id="save-ansible-editor-btn">
-                                            <i class="fas fa-save"></i> Save
-                                        </button>
-                                        <button class="btn btn-success" id="run-ansible-editor-btn">
-                                            <i class="fas fa-play"></i> Run
-                                        </button>
-                                        <button class="btn btn-secondary" id="clear-ansible-editor-btn">
-                                            <i class="fas fa-eraser"></i> Clear
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </section>
 
             <!-- Terraform Section -->
@@ -768,25 +874,45 @@
                     </div>
                     <div class="file-upload-section">
                         <div class="upload-tabs">
-                            <button class="tab-btn active" data-tab="upload-tf">Upload Files</button>
+                            <button class="tab-btn active" data-tab="overview-terraform">Overview</button>
+                            <button class="tab-btn" data-tab="upload-tf">Upload Files</button>
                             <button class="tab-btn" data-tab="existing-tf">Existing Files</button>
                             <button class="tab-btn" data-tab="directories-tf">Project Directories</button>
                             <button class="tab-btn" data-tab="editor-tf">Config Editor</button>
                         </div>
                         <div class="tab-content">
-                            <div id="upload-tf-tab" class="tab-pane active">
+                            <!-- Overview Tab -->
+                            <div id="overview-terraform-tab" class="tab-pane active">
+                                <div class="overview-container">
+                                    <div class="overview-header">
+                                        <h3><i class="fas fa-cloud"></i> Terraform Environment Overview</h3>
+                                        <button id="refresh-terraform-overview-btn" class="btn btn-secondary">
+                                            <i class="fas fa-sync-alt"></i> Refresh
+                                        </button>
+                                    </div>
+                                    <div id="terraform-overview-content" class="overview-content">
+                                        <div class="info-placeholder">
+                                            <i class="fas fa-cloud"></i>
+                                            <p>Select a machine to view Terraform environment information</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="upload-tf-tab" class="tab-pane">
                                 <div class="drop-zone" id="terraform-drop-zone">
                                     <i class="fas fa-cloud-upload-alt"></i>
                                     <p>Drag & drop Terraform files here or click to browse</p>
                                     <input type="file" id="terraform-file-input" accept=".tf,.tfvars" multiple hidden>
                                 </div>
                                 <div class="tab-actions">
-                                    <button class="btn btn-success" id="run-terraform-upload-btn">
-                                        <i class="fas fa-play"></i> Run
-                                    </button>
-                                    <button class="btn btn-secondary" id="clear-terraform-upload-btn">
-                                        <i class="fas fa-eraser"></i> Clear
-                                    </button>
+                                    <div class="action-buttons">
+                                        <button class="btn btn-success" id="run-terraform-upload-btn">
+                                            <i class="fas fa-play"></i> Run
+                                        </button>
+                                        <button class="btn btn-secondary" id="clear-terraform-upload-btn">
+                                            <i class="fas fa-eraser"></i> Clear
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                             <div id="existing-tf-tab" class="tab-pane">
@@ -816,16 +942,18 @@
                                             <h5 id="terraform-current-directory">Directory: </h5>
                                             <div class="directory-controls">
                                                 <input type="file" id="terraform-dir-file-input" multiple hidden>
-                                                <button class="btn btn-sm btn-secondary"
-                                                    id="terraform-upload-to-dir-btn">
-                                                    <i class="fas fa-upload"></i> Upload Files
-                                                </button>
-                                                <button class="btn btn-sm btn-info" id="terraform-refresh-dir-btn">
-                                                    <i class="fas fa-sync"></i> Refresh
-                                                </button>
-                                                <button class="btn btn-sm btn-warning" id="terraform-close-dir-btn">
-                                                    <i class="fas fa-times"></i> Close
-                                                </button>
+                                                <div class="action-buttons">
+                                                    <button class="btn btn-sm btn-secondary"
+                                                        id="terraform-upload-to-dir-btn">
+                                                        <i class="fas fa-upload"></i> Upload Files
+                                                    </button>
+                                                    <button class="btn btn-sm btn-info" id="terraform-refresh-dir-btn">
+                                                        <i class="fas fa-sync"></i> Refresh
+                                                    </button>
+                                                    <button class="btn btn-sm btn-warning" id="terraform-close-dir-btn">
+                                                        <i class="fas fa-times"></i> Close
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                         <div class="directory-files" id="terraform-directory-files">
@@ -951,9 +1079,11 @@
                                 <div class="editor-actions">
                                     <input type="text" id="terraform-filename" class="form-control"
                                         placeholder="main.tf">
-                                    <button class="btn btn-primary" id="save-terraform-btn">
-                                        <i class="fas fa-save"></i> Save
-                                    </button>
+                                    <div class="action-buttons">
+                                        <button class="btn btn-primary" id="save-terraform-btn">
+                                            <i class="fas fa-save"></i> Save
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -967,18 +1097,20 @@
                         </div>
                     </div>
                     <div class="terraform-actions">
-                        <button class="btn btn-secondary" id="terraform-init-btn"
-                            title="Initialize Terraform working directory and download required providers">
-                            <i class="fas fa-download"></i> Init
-                        </button>
-                        <button class="btn btn-info" id="terraform-plan-btn"
-                            title="Generate and show an execution plan for your infrastructure changes">
-                            <i class="fas fa-search"></i> Plan
-                        </button>
-                        <button class="btn btn-success" id="terraform-apply-btn"
-                            title="Apply the changes required to reach the desired state of the configuration">
-                            <i class="fas fa-play"></i> Apply
-                        </button>
+                        <div class="action-buttons">
+                            <button class="btn btn-secondary" id="terraform-init-btn"
+                                title="Initialize Terraform working directory and download required providers">
+                                <i class="fas fa-download"></i> Init
+                            </button>
+                            <button class="btn btn-info" id="terraform-plan-btn"
+                                title="Generate and show an execution plan for your infrastructure changes">
+                                <i class="fas fa-search"></i> Plan
+                            </button>
+                            <button class="btn btn-success" id="terraform-apply-btn"
+                                title="Apply the changes required to reach the desired state of the configuration">
+                                <i class="fas fa-play"></i> Apply
+                            </button>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -988,7 +1120,8 @@
                 <div class="script-panel">
                     <!-- Installation Requirements Notice -->
                     <div class="installation-notice">
-                        <span class="installation-notice-text">Ensure Docker is installed with full permissions in selected machine</span>
+                        <span class="installation-notice-text">Ensure Docker is installed with full permissions in
+                            selected machine</span>
                         <i class="fas fa-info-circle installation-info-icon">
                             <div class="installation-tooltip">
                                 <h6><i class="fab fa-docker"></i> Docker Installation & Permissions Guide</h6>
@@ -1033,7 +1166,6 @@
                         <label for="docker-machine-select">Select Machine:</label>
                         <select id="docker-machine-select" class="form-control">
                             <option value="">Choose a machine...</option>
-                            <option value="localhost">Localhost</option>
                         </select>
                     </div>
 
@@ -1045,6 +1177,8 @@
                             <button class="tab-btn" data-tab="containers-docker">Containers</button>
                             <button class="tab-btn" data-tab="networks-docker">Networks</button>
                             <button class="tab-btn" data-tab="volumes-docker">Volumes</button>
+                            <button class="tab-btn" data-tab="directories-docker">Project Directories</button>
+                            <button class="tab-btn" data-tab="editor-docker">Docker Editor</button>
                             <button class="tab-btn" data-tab="actions-docker">Actions</button>
                         </div>
 
@@ -1055,9 +1189,11 @@
                                     <div class="docker-status-card">
                                         <div class="status-header">
                                             <h4><i class="fab fa-docker"></i> Docker System Information</h4>
-                                            <button class="btn btn-sm btn-info" id="refresh-docker-info-btn">
-                                                <i class="fas fa-sync"></i> Refresh
-                                            </button>
+                                            <div class="action-buttons">
+                                                <button class="btn btn-sm btn-info" id="refresh-docker-info-btn">
+                                                    <i class="fas fa-sync"></i> Refresh
+                                                </button>
+                                            </div>
                                         </div>
                                         <div class="status-content" id="docker-info-content">
                                             <div class="info-placeholder">
@@ -1103,12 +1239,14 @@
                                     <div class="section-header">
                                         <h4><i class="fas fa-hdd"></i> Docker Images</h4>
                                         <div class="section-actions">
-                                            <button class="btn btn-sm btn-primary" id="pull-image-btn">
-                                                <i class="fas fa-download"></i> Pull Image
-                                            </button>
-                                            <button class="btn btn-sm btn-info" id="refresh-images-btn">
-                                                <i class="fas fa-sync"></i> Refresh
-                                            </button>
+                                            <div class="action-buttons">
+                                                <button class="btn btn-sm btn-primary" id="pull-image-btn">
+                                                    <i class="fas fa-download"></i> Pull Image
+                                                </button>
+                                                <button class="btn btn-sm btn-info" id="refresh-images-btn">
+                                                    <i class="fas fa-sync"></i> Refresh
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="docker-table-container">
@@ -1153,12 +1291,14 @@
                                                     </span>
                                                 </label>
                                             </div>
-                                            <button class="btn btn-sm btn-success" id="run-container-btn">
-                                                <i class="fas fa-play"></i> Run Container
-                                            </button>
-                                            <button class="btn btn-sm btn-info" id="refresh-containers-btn">
-                                                <i class="fas fa-sync"></i> Refresh
-                                            </button>
+                                            <div class="action-buttons">
+                                                <button class="btn btn-sm btn-success" id="run-container-btn">
+                                                    <i class="fas fa-play"></i> Run Container
+                                                </button>
+                                                <button class="btn btn-sm btn-info" id="refresh-containers-btn">
+                                                    <i class="fas fa-sync"></i> Refresh
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="docker-table-container">
@@ -1236,9 +1376,11 @@
                                     <div class="section-header">
                                         <h4><i class="fas fa-network-wired"></i> Docker Networks</h4>
                                         <div class="section-actions">
-                                            <button class="btn btn-sm btn-info" id="refresh-networks-btn">
-                                                <i class="fas fa-sync"></i> Refresh
-                                            </button>
+                                            <div class="action-buttons">
+                                                <button class="btn btn-sm btn-info" id="refresh-networks-btn">
+                                                    <i class="fas fa-sync"></i> Refresh
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="docker-table-container">
@@ -1270,9 +1412,11 @@
                                     <div class="section-header">
                                         <h4><i class="fas fa-database"></i> Docker Volumes</h4>
                                         <div class="section-actions">
-                                            <button class="btn btn-sm btn-info" id="refresh-volumes-btn">
-                                                <i class="fas fa-sync"></i> Refresh
-                                            </button>
+                                            <div class="action-buttons">
+                                                <button class="btn btn-sm btn-info" id="refresh-volumes-btn">
+                                                    <i class="fas fa-sync"></i> Refresh
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="docker-table-container">
@@ -1292,6 +1436,160 @@
                                                 Select a machine to view Docker volumes
                                             </div>
                                         </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Project Directories Tab -->
+                            <div id="directories-docker-tab" class="tab-pane">
+                                <div class="directory-management">
+                                    <div class="directory-header">
+                                        <h4><i class="fas fa-folder-plus"></i> Docker Project Directory Management</h4>
+                                        <div class="directory-actions">
+                                            <input type="text" id="docker-new-dir-name" class="form-control"
+                                                placeholder="Enter directory name..."
+                                                style="display: inline-block; width: 200px; margin-right: 10px;">
+                                            <button class="btn btn-primary" id="create-docker-dir-btn">
+                                                <i class="fas fa-plus"></i> Create Directory
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="directories-grid" id="docker-directories-grid">
+                                        <!-- Directories will be listed here -->
+                                    </div>
+                                    <div class="directory-details" id="docker-directory-details" style="display: none;">
+                                        <div class="directory-details-header">
+                                            <h5 id="docker-current-directory">Directory: </h5>
+                                            <div class="directory-controls">
+                                                <input type="file" id="docker-dir-file-input" multiple hidden>
+                                                <div class="action-buttons">
+                                                    <button class="btn btn-sm btn-secondary"
+                                                        id="docker-upload-to-dir-btn">
+                                                        <i class="fas fa-upload"></i> Upload Files
+                                                    </button>
+                                                    <button class="btn btn-sm btn-info" id="docker-refresh-dir-btn">
+                                                        <i class="fas fa-sync"></i> Refresh
+                                                    </button>
+                                                    <button class="btn btn-sm btn-warning" id="docker-close-dir-btn">
+                                                        <i class="fas fa-times"></i> Close
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="directory-files" id="docker-directory-files">
+                                            <!-- Directory files will be listed here -->
+                                        </div>
+                                        <div class="directory-execution">
+                                            <h6><i class="fas fa-layer-group"></i> Docker Project Execution Controls
+                                            </h6>
+                                            <div class="project-execution-mode">
+                                                <div class="main-file-selection">
+                                                    <label class="form-label">Docker Compose File:</label>
+                                                    <div class="main-file-controls">
+                                                        <select id="docker-main-file" class="form-control">
+                                                            <option value="">Select docker-compose.yml or Dockerfile...
+                                                            </option>
+                                                        </select>
+                                                        <button class="btn btn-sm btn-info" id="docker-detect-main-btn">
+                                                            <i class="fas fa-search"></i> Auto-detect
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div class="execution-options">
+                                                    <div class="docker-execution-options">
+                                                        <label class="form-label">Docker Options:</label>
+                                                        <div class="docker-option-controls">
+                                                            <label class="docker-option">
+                                                                <input type="checkbox" id="docker-project-detached"
+                                                                    checked>
+                                                                <span>Run in detached mode</span>
+                                                            </label>
+                                                            <label class="docker-option">
+                                                                <input type="checkbox" id="docker-project-build">
+                                                                <span>Build images before starting</span>
+                                                            </label>
+                                                            <label class="docker-option">
+                                                                <input type="checkbox"
+                                                                    id="docker-project-force-recreate">
+                                                                <span>Force recreate containers</span>
+                                                            </label>
+                                                            <label class="docker-option">
+                                                                <input type="checkbox"
+                                                                    id="docker-project-remove-orphans">
+                                                                <span>Remove orphan containers</span>
+                                                            </label>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="execution-info">
+                                                    <div class="execution-note">
+                                                        <i class="fas fa-info-circle"></i>
+                                                        <span>This will execute the selected Docker Compose file or
+                                                            build from Dockerfile in the project directory.</span>
+                                                    </div>
+                                                </div>
+                                                <div class="project-action-buttons">
+                                                    <button class="btn btn-success" id="docker-execute-project-btn">
+                                                        <i class="fas fa-play"></i> Execute Docker Project
+                                                    </button>
+                                                    <button class="btn btn-warning" id="docker-stop-project-btn">
+                                                        <i class="fas fa-stop"></i> Stop Project
+                                                    </button>
+                                                    <button class="btn btn-danger" id="docker-down-project-btn">
+                                                        <i class="fas fa-arrow-down"></i> Down Project
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="execution-status" id="docker-execution-status"
+                                            style="display: none;">
+                                            <div class="status-message" id="docker-status-message"></div>
+                                            <div class="status-progress">
+                                                <div class="progress-bar" id="docker-progress-bar"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Docker Editor Tab -->
+                            <div id="editor-docker-tab" class="tab-pane">
+                                <div class="code-editor-container">
+                                    <div class="editor-header">
+                                        <div class="editor-tabs">
+                                            <div class="editor-tab active">
+                                                <i class="fab fa-docker"></i>
+                                                <span id="docker-tab-name">docker-compose.yml</span>
+                                                <button class="tab-close">×</button>
+                                            </div>
+                                        </div>
+                                        <div class="editor-controls">
+                                            <button class="editor-btn" title="Format YAML"><i
+                                                    class="fas fa-magic"></i></button>
+                                            <button class="editor-btn" title="Validate Compose"><i
+                                                    class="fas fa-check"></i></button>
+                                        </div>
+                                    </div>
+                                    <div class="code-editor-wrapper">
+                                        <div class="line-numbers" id="docker-line-numbers"></div>
+                                        <textarea id="docker-editor" class="code-editor"
+                                            placeholder="# Write your Docker Compose or Dockerfile content here...&#10;version: '3.8'&#10;services:&#10;  web:&#10;    image: nginx:latest&#10;    ports:&#10;      - '80:80'"
+                                            spellcheck="false"></textarea>
+                                    </div>
+                                </div>
+                                <div class="editor-actions">
+                                    <input type="text" id="docker-filename" class="form-control"
+                                        placeholder="docker-compose.yml">
+                                    <div class="action-buttons">
+                                        <button class="btn btn-primary" id="save-docker-btn">
+                                            <i class="fas fa-save"></i> Save
+                                        </button>
+                                        <button class="btn btn-success" id="run-docker-editor-btn">
+                                            <i class="fas fa-play"></i> Run
+                                        </button>
+                                        <button class="btn btn-secondary" id="clear-docker-editor-btn">
+                                            <i class="fas fa-eraser"></i> Clear
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -1430,11 +1728,6 @@
                                                         placeholder="version: '3.8'&#10;services:&#10;  web:&#10;    image: nginx:latest&#10;    ports:&#10;      - '80:80'"></textarea>
                                                 </div>
                                                 <div class="form-group">
-                                                    <label>Compose File Name:</label>
-                                                    <input type="text" id="compose-filename" class="form-control"
-                                                        value="docker-compose.yml">
-                                                </div>
-                                                <div class="form-group">
                                                     <label>
                                                         <input type="checkbox" id="compose-detached" checked> Run in
                                                         detached mode
@@ -1446,9 +1739,11 @@
                                                         starting
                                                     </label>
                                                 </div>
-                                                <button class="btn btn-success" id="execute-compose-up-btn">
-                                                    <i class="fas fa-play"></i> Compose Up
-                                                </button>
+                                                <div class="action-buttons">
+                                                    <button class="btn btn-success" id="execute-compose-up-btn">
+                                                        <i class="fas fa-play"></i> Compose Up
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -1571,9 +1866,11 @@
                 </form>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" id="cancel-machine-btn">Cancel</button>
-                <button class="btn btn-info" id="test-connection-btn">Test Connection</button>
-                <button class="btn btn-primary" id="save-machine-btn">Save Machine</button>
+                <div class="action-buttons">
+                    <button class="btn btn-secondary" id="cancel-machine-btn">Cancel</button>
+                    <button class="btn btn-info" id="test-connection-btn">Test Connection</button>
+                    <button class="btn btn-primary" id="save-machine-btn">Save Machine</button>
+                </div>
             </div>
         </div>
     </div>

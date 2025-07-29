@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "remoterunlib"
-version = "0.7"
-description = "remoterunlib is a Python library that facilitates remote command execution"
+version = "0.8"
+description = "Enterprise remote management library for SSH, Docker, Ansible, Terraform, PowerShell, and web dashboard automation."
 readme = "README.md"
 authors = ["Sharath Kumar <dsharathrao@gmail.com>"]
 repository = "https://github.com/dsharathrao/remoterunlib"
@@ -33,7 +33,7 @@ flask-socketio = "^5.5.0"
 flask-cors = "^4.0.0"
 ansible = {version = "^8.7.0", markers = "sys_platform == 'linux'"}
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 pytest = "^6.2"
 paramiko = "3.4.0"
 pre-commit = "^2.12"

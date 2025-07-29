@@ -1,15 +1,17 @@
+
 from remoterunlib import SSHClient
 
+if __name__ == "__main__":
+    client = SSHClient(hostname='192.168.0.100', username='sharath', password='')
+    client.login()
 
-client = SSHClient(hostname='192.168.0.100', username='sharath', password='')
+    # Run a shell command
+    print(client.run_command('ls -l'))
 
-client.login()
+    # Run an Ansible playbook
+    client.run_ansible_playbook('test_playbook.yml', inventory_file='inventory.ini')
 
-client.run_command('ls -l')
+    # Run an ad-hoc Ansible command
+    client.run_ansible_playbook('uptime', inventory_file='inventory.ini')
 
-client.run_ansible_playbook('test_playbook.yml', inventory_file='inventory.ini', out='output1.log', display=False, extra_vars='my_var=my_value')
-client.run_ansible_playbook('uptime', inventory_file='inventory.ini', out='output2.log')
-client.run_command('ls -l')
-client.run_ansible_playbook('uptime', out='output3.log')
-
-client.close()
+    client.close()

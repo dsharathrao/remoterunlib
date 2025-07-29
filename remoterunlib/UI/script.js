@@ -7,12 +7,14 @@ class RemoteRunApp {
         this.socket = null;
         this.editors = {};
         this.editingContext = null; // For tracking file editing state
+
         // Dashboard state
         this.dashboardFilters = {
             machine_id: '',
             type: '',
             status: ''
         };
+
         // Auto-logs state management
         this.logsState = {
             isExecuting: false,
@@ -22,6 +24,11 @@ class RemoteRunApp {
             executionStartTime: null,
             manuallyCollapsed: false
         };
+
+        // Running executions tracking
+        this.runningExecutions = new Map();
+        this.notificationQueue = [];
+
         this.init();
     }
 
@@ -35,6 +42,10 @@ class RemoteRunApp {
         this.setupCodeEditors();
         this.setupDockerInterface();
         this.startPingInterval();
+        this.setupNotificationSystem();
+
+        // Initialize running executions display (ensures spinner starts correctly)
+        this.updateRunningExecutionsDisplay();
 
         // Add event listener for Execute Command button
         const execBtn = document.getElementById('execute-command-btn');
@@ -77,6 +88,13 @@ class RemoteRunApp {
             saveTerraformBtn.addEventListener('click', () => this.saveTerraformScript());
         }
 
+        // Docker Save button
+        const saveDockerBtn = document.getElementById('save-docker-btn');
+        if (saveDockerBtn) {
+            saveDockerBtn.onclick = null;
+            saveDockerBtn.addEventListener('click', () => this.saveDockerScript());
+        }
+
         // Add event listeners for Clear buttons
         const clearCommandBtn = document.getElementById('clear-command-btn');
         if (clearCommandBtn) {
@@ -91,6 +109,12 @@ class RemoteRunApp {
         const clearTerraformBtn = document.getElementById('clear-terraform-btn');
         if (clearTerraformBtn) {
             clearTerraformBtn.addEventListener('click', () => this.clearTerraform());
+        }
+
+        // Docker Clear button
+        const clearDockerBtn = document.getElementById('clear-docker-editor-btn');
+        if (clearDockerBtn) {
+            clearDockerBtn.addEventListener('click', () => this.clearDocker());
         }
 
         // Add event listeners for new tab-specific buttons
@@ -134,6 +158,12 @@ class RemoteRunApp {
         const clearAnsibleEditorBtn = document.getElementById('clear-ansible-editor-btn');
         if (clearAnsibleEditorBtn) {
             clearAnsibleEditorBtn.addEventListener('click', () => this.clearAnsible());
+        }
+
+        // Docker editor buttons
+        const runDockerEditorBtn = document.getElementById('run-docker-editor-btn');
+        if (runDockerEditorBtn) {
+            runDockerEditorBtn.addEventListener('click', () => this.runDockerScript());
         }
 
         // Ansible Ad-hoc buttons
@@ -239,6 +269,9 @@ class RemoteRunApp {
         // Initialize privilege controls
         this.initPrivilegeControls();
 
+        // Initialize overview functionality
+        this.initOverviewFunctionality();
+
         // Initialize auto-logs behavior
         this.initAutoLogsManagement();
     }
@@ -295,6 +328,76 @@ class RemoteRunApp {
         } else {
             container.classList.remove('enabled');
         }
+    }
+
+    // === OVERVIEW FUNCTIONALITY INITIALIZATION ===
+    initOverviewFunctionality() {
+        // Python overview refresh button
+        const refreshPythonOverviewBtn = document.getElementById('refresh-python-overview-btn');
+        if (refreshPythonOverviewBtn) {
+            refreshPythonOverviewBtn.addEventListener('click', () => this.refreshPythonOverview(true));
+        }
+
+        // Ansible overview refresh button
+        const refreshAnsibleOverviewBtn = document.getElementById('refresh-ansible-overview-btn');
+        if (refreshAnsibleOverviewBtn) {
+            refreshAnsibleOverviewBtn.addEventListener('click', () => this.refreshAnsibleOverview(true));
+        }
+
+        // Terraform overview refresh button
+        const refreshTerraformOverviewBtn = document.getElementById('refresh-terraform-overview-btn');
+        if (refreshTerraformOverviewBtn) {
+            refreshTerraformOverviewBtn.addEventListener('click', () => this.refreshTerraformOverview(true));
+        }
+
+        // Machine selection change handlers for overview auto-refresh
+        const pythonMachineSelect = document.getElementById('python-machine-select');
+        if (pythonMachineSelect) {
+            pythonMachineSelect.addEventListener('change', () => {
+                // Check if overview tab is active
+                const overviewTab = document.querySelector('#python-section .tab-btn[data-tab="overview-python"]');
+                if (overviewTab && overviewTab.classList.contains('active')) {
+                    this.refreshPythonOverview();
+                }
+            });
+        }
+
+        const ansibleMachineSelect = document.getElementById('ansible-machine-select');
+        if (ansibleMachineSelect) {
+            ansibleMachineSelect.addEventListener('change', () => {
+                // Check if overview tab is active
+                const overviewTab = document.querySelector('#ansible-section .tab-btn[data-tab="overview-ansible"]');
+                if (overviewTab && overviewTab.classList.contains('active')) {
+                    this.refreshAnsibleOverview();
+                }
+            });
+        }
+
+        const terraformMachineSelect = document.getElementById('terraform-machine-select');
+        if (terraformMachineSelect) {
+            terraformMachineSelect.addEventListener('change', () => {
+                // Check if overview tab is active
+                const overviewTab = document.querySelector('#terraform-section .tab-btn[data-tab="overview-terraform"]');
+                if (overviewTab && overviewTab.classList.contains('active')) {
+                    this.refreshTerraformOverview();
+                }
+            });
+        }
+
+        // Tab switching handlers for overview auto-load
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('tab-btn')) {
+                const tabName = e.target.dataset.tab;
+
+                if (tabName === 'overview-python') {
+                    setTimeout(() => this.refreshPythonOverview(), 100);
+                } else if (tabName === 'overview-ansible') {
+                    setTimeout(() => this.refreshAnsibleOverview(), 100);
+                } else if (tabName === 'overview-terraform') {
+                    setTimeout(() => this.refreshTerraformOverview(), 100);
+                }
+            }
+        });
     }
 
     // === AUTO-LOGS MANAGEMENT SYSTEM ===
@@ -509,6 +612,8 @@ class RemoteRunApp {
         // Initial load
         this.loadDashboardStats();
         this.loadDashboardHistory();
+        // Update running executions display
+        this.updateRunningExecutionsDisplay();
         // Populate machine filter
         this.populateDashboardMachineFilter();
         // Filter change listeners
@@ -544,6 +649,8 @@ class RemoteRunApp {
             document.getElementById('failed-executions').textContent = stats.failed_executions || 0;
             document.getElementById('active-machines').textContent = stats.active_machines || 0;
             document.getElementById('recent-executions').textContent = stats.recent_executions || 0;
+            // Use client-side running executions count instead of backend
+            document.getElementById('running-executions').textContent = this.runningExecutions.size;
         } catch (e) {
             // ignore
         }
@@ -589,9 +696,11 @@ class RemoteRunApp {
                     <div class="execution-time">${item.started_at ? this.formatDate(item.started_at) : ''}</div>
                     <div class="execution-time">${item.status || ''}</div>
                 </div>
+                <div class="execution-actions"></div>
             `;
-            // Store execution id for click
+            // Store execution id for click and cancel functionality
             div.dataset.execId = item.id;
+            div.dataset.executionId = item.id;
             // Fetch and show machine host
             if (item.machine_id === "local" && item.type === "terraform") {
                 // For terraform local executions, show "Local" as host
@@ -606,6 +715,9 @@ class RemoteRunApp {
             div.addEventListener('click', () => this.showExecutionDetails(item.id));
             list.appendChild(div);
         }
+
+        // Apply running status indicators after rendering
+        this.updateExecutionHistoryWithRunningStatus();
     }
 
     async showExecutionDetails(execId) {
@@ -763,11 +875,19 @@ class RemoteRunApp {
     }
 
     startPingInterval() {
-        // Ping all machines every 2 minutes
+        // Ping all machines every 5 minutes
         if (this.pingInterval) clearInterval(this.pingInterval);
         this.pingInterval = setInterval(() => {
             this.pingAllMachines();
         }, 5 * 60000); // 300,000 ms = 5 minutes
+
+        // Refresh dashboard stats every 10 seconds when on dashboard
+        if (this.dashboardStatsInterval) clearInterval(this.dashboardStatsInterval);
+        this.dashboardStatsInterval = setInterval(() => {
+            if (this.currentSection === 'dashboard') {
+                this.loadDashboardStats();
+            }
+        }, 10000); // 10 seconds
     }
 
     async pingAllMachines() {
@@ -866,14 +986,33 @@ class RemoteRunApp {
         if (window.io && typeof io === 'function') {
             try {
                 // Connect to /ws namespace
-                this.socket = io('/ws', { transports: ['websocket'] });
+                this.socket = io('/ws', { transports: ['websocket', 'polling'] });
 
                 this.socket.on('connect', () => {
-                    this.addLog('Connected to live logs via Socket.IO', 'success');
+                    this.addLog('Connected to RemoteRunLib Dashboard', 'success');
+                });
+
+                this.socket.on('connected', (data) => {
+                    this.addLog(data.message, 'info');
                 });
 
                 this.socket.on('log', (data) => {
                     this.addLog(data.message, data.level || 'info');
+                });
+
+                // Handle execution status updates
+                this.socket.on('execution_status_update', (data) => {
+                    this.handleExecutionStatusUpdate(data);
+                });
+
+                // Handle execution started events
+                this.socket.on('execution_started', (data) => {
+                    this.handleExecutionStarted(data);
+                });
+
+                // Handle notifications
+                this.socket.on('notification', (data) => {
+                    this.showNotification(data.message, data.type, data.duration);
                 });
 
                 this.socket.on('disconnect', () => {
@@ -892,6 +1031,212 @@ class RemoteRunApp {
         } else {
             this.addLog('Socket.IO client not loaded, using WebSocket fallback', 'warning');
             this.setupWebSocket();
+        }
+    }
+
+    setupNotificationSystem() {
+        // Create notification container if it doesn't exist
+        if (!document.getElementById('notification-container')) {
+            const container = document.createElement('div');
+            container.id = 'notification-container';
+            container.className = 'notification-container';
+            document.body.appendChild(container);
+        }
+    }
+
+    showNotification(message, type = 'info', duration = 5000) {
+        const container = document.getElementById('notification-container');
+        if (!container) return;
+
+        const notification = document.createElement('div');
+        notification.className = `notification notification-${type}`;
+
+        const icon = this.getNotificationIcon(type);
+        notification.innerHTML = `
+            <div class="notification-content">
+                <i class="${icon}"></i>
+                <span>${message}</span>
+            </div>
+            <button class="notification-close" onclick="this.parentElement.remove()">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+
+        container.appendChild(notification);
+
+        // Auto-remove after duration
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.remove();
+            }
+        }, duration);
+
+        // Add to notification queue for tracking
+        this.notificationQueue.push({
+            message,
+            type,
+            timestamp: new Date()
+        });
+
+        // Keep only last 10 notifications in queue
+        if (this.notificationQueue.length > 10) {
+            this.notificationQueue.shift();
+        }
+    }
+
+    getNotificationIcon(type) {
+        switch (type) {
+            case 'success': return 'fas fa-check-circle';
+            case 'error': return 'fas fa-exclamation-circle';
+            case 'warning': return 'fas fa-exclamation-triangle';
+            case 'info':
+            default: return 'fas fa-info-circle';
+        }
+    }
+
+    handleExecutionStarted(data) {
+        const { execution_id, type, command, machine_id } = data;
+
+        // Add to running executions
+        this.runningExecutions.set(execution_id, {
+            type,
+            command,
+            machine_id,
+            started_at: new Date(),
+            status: 'running'
+        });
+
+        // Add log entry
+        this.addLog(`🚀 ${type.toUpperCase()} execution started: ${command}`, 'info');
+
+        // Auto-popup logs panel for new executions
+        this.autoShowLogs();
+
+        // Update dashboard if on dashboard section
+        if (this.currentSection === 'dashboard') {
+            this.loadDashboardHistory();
+            this.loadDashboardStats(); // Refresh stats to update running count
+        }
+
+        // Update running executions display
+        this.updateRunningExecutionsDisplay();
+    }
+
+    handleExecutionStatusUpdate(data) {
+        const { execution_id, status, output, errors, completed_at } = data;
+
+        if (this.runningExecutions.has(execution_id)) {
+            const execution = this.runningExecutions.get(execution_id);
+            execution.status = status;
+            execution.completed_at = completed_at;
+
+            // If execution is complete, show results and remove from running
+            if (status === 'success' || status === 'failed' || status === 'cancelled') {
+                const isSuccess = status === 'success';
+                const icon = isSuccess ? '✅' : (status === 'cancelled' ? '🚫' : '❌');
+                const logLevel = isSuccess ? 'success' : 'error';
+
+                this.addLog(`${icon} ${execution.type.toUpperCase()} execution ${status}: ${execution.command}`, logLevel);
+
+                if (output) {
+                    this.addLog(`📋 Output:\n${output}`, 'info');
+                }
+
+                if (errors) {
+                    this.addLog(`⚠️ Errors:\n${errors}`, 'error');
+                }
+
+                // Remove from running executions
+                this.runningExecutions.delete(execution_id);
+            }
+
+            // Update displays
+            this.updateRunningExecutionsDisplay();
+
+            if (this.currentSection === 'dashboard') {
+                this.loadDashboardHistory();
+                this.loadDashboardStats(); // Refresh stats when execution completes
+            }
+        }
+    }
+
+    updateRunningExecutionsDisplay() {
+        // Update dashboard stats to show running executions
+        const runningCount = this.runningExecutions.size;
+        const runningElement = document.getElementById('running-executions');
+        if (runningElement) {
+            runningElement.textContent = runningCount;
+        }
+
+        // Update spinner visibility based on running executions count
+        const spinnerIcon = document.querySelector('.stat-card .stat-icon.running i');
+        if (spinnerIcon) {
+            if (runningCount > 0) {
+                spinnerIcon.classList.add('fa-spin');
+            } else {
+                spinnerIcon.classList.remove('fa-spin');
+            }
+        }
+
+        // Also refresh dashboard stats from backend to ensure synchronization
+        if (this.currentSection === 'dashboard') {
+            this.loadDashboardStats();
+        }
+
+        // Update execution history with loading indicators
+        this.updateExecutionHistoryWithRunningStatus();
+    }
+
+    updateExecutionHistoryWithRunningStatus() {
+        const executionItems = document.querySelectorAll('.execution-item');
+        executionItems.forEach(item => {
+            const statusElement = item.querySelector('.execution-status');
+            const actionsElement = item.querySelector('.execution-actions');
+
+            // Check if this execution is running
+            const executionId = item.dataset.executionId;
+            if (executionId && this.runningExecutions.has(executionId)) {
+                // Add spinning indicator
+                statusElement.classList.add('running');
+                statusElement.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+                // Add cancel button if not already present
+                if (!actionsElement.querySelector('.cancel-btn')) {
+                    const cancelBtn = document.createElement('button');
+                    cancelBtn.className = 'cancel-btn';
+                    cancelBtn.innerHTML = '<i class="fas fa-stop"></i> Cancel';
+                    cancelBtn.onclick = () => this.cancelExecution(executionId);
+                    actionsElement.appendChild(cancelBtn);
+                }
+            } else {
+                // Remove spinning indicator and cancel button
+                statusElement.classList.remove('running');
+                statusElement.innerHTML = '';
+                const cancelBtn = actionsElement?.querySelector('.cancel-btn');
+                if (cancelBtn) {
+                    cancelBtn.remove();
+                }
+            }
+        });
+    }
+
+    async cancelExecution(executionId) {
+        try {
+            const response = await fetch(`/api/executions/${executionId}/cancel`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                this.addLog(`🚫 Cancelled execution: ${executionId}`, 'warning');
+                this.runningExecutions.delete(executionId);
+                this.updateRunningExecutionsDisplay();
+            } else {
+                this.addLog(`❌ Failed to cancel execution: ${result.message}`, 'error');
+            }
+        } catch (error) {
+            this.addLog(`❌ Error cancelling execution: ${error.message}`, 'error');
         }
     }
 
@@ -988,6 +1333,17 @@ class RemoteRunApp {
                     this.loadDirectories('ansible');
                 } else if (tabName === 'directories-tf') {
                     this.loadDirectories('terraform');
+                } else if (tabName === 'directories-docker') {
+                    this.loadDirectories('docker');
+                }
+
+                // Load overview data when switching to overview tabs
+                if (tabName === 'overview-python') {
+                    this.refreshPythonOverview();
+                } else if (tabName === 'overview-ansible') {
+                    this.refreshAnsibleOverview();
+                } else if (tabName === 'overview-terraform') {
+                    this.refreshTerraformOverview();
                 }
             });
         });
@@ -995,7 +1351,7 @@ class RemoteRunApp {
 
     setupCodeEditors() {
         // Setup line numbers and enhanced functionality for code editors
-        const editors = ['python-editor', 'ansible-editor', 'terraform-editor'];
+        const editors = ['python-editor', 'ansible-editor', 'terraform-editor', 'docker-editor'];
 
         editors.forEach(editorId => {
             const editor = document.getElementById(editorId);
@@ -1177,6 +1533,28 @@ class RemoteRunApp {
         minimizeBtn.style.display = 'none';
     }
 
+    autoShowLogs() {
+        // Auto-popup the logs panel when execution starts
+        const logsPanel = document.getElementById('logs-panel');
+        const toggleBtn = document.getElementById('toggle-logs-btn');
+
+        if (logsPanel && logsPanel.classList.contains('collapsed')) {
+            logsPanel.classList.remove('collapsed');
+
+            // Update toggle button
+            if (toggleBtn) {
+                const icon = toggleBtn.querySelector('i');
+                if (icon) {
+                    icon.className = 'fas fa-chevron-down';
+                    toggleBtn.title = 'Collapse';
+                }
+            }
+
+            // Add a visual indicator that logs auto-opened
+            this.addLog('📋 Live logs auto-opened for execution monitoring', 'info');
+        }
+    }
+
     switchSection(section) {
         // Update navigation
         document.querySelectorAll('.nav-item').forEach(item => {
@@ -1196,7 +1574,8 @@ class RemoteRunApp {
             commands: 'Execute Commands',
             python: 'Python Scripts',
             ansible: 'Ansible Playbooks',
-            terraform: 'Terraform'
+            terraform: 'Terraform',
+            docker: 'Docker Management'
         };
         document.getElementById('page-title').textContent = titles[section];
 
@@ -1213,6 +1592,9 @@ class RemoteRunApp {
             document.getElementById('add-machine-btn').addEventListener('click', () => {
                 this.showModal('add-machine-modal');
             });
+
+            // Load OS information for all machines (only once per session)
+            this.loadAllMachineOSInfo();
         }
 
         // Load existing files when switching to script sections
@@ -1231,6 +1613,8 @@ class RemoteRunApp {
             this.loadDashboardStats();
             this.loadDashboardHistory();
             this.populateDashboardMachineFilter();
+            // Update running executions count with client-side data
+            this.updateRunningExecutionsDisplay();
         }
     }
 
@@ -1258,6 +1642,7 @@ class RemoteRunApp {
             const authType = machine.auth_type || 'password';
             const status = machine.status === 'online' ? 'online' : 'offline';
             const statusText = machine.status ? machine.status : 'offline';
+
             const card = document.createElement('div');
             card.className = 'machine-card';
             card.innerHTML = `
@@ -1271,6 +1656,7 @@ class RemoteRunApp {
                     <p><strong>Host:</strong> ${machine.host}:${port}</p>
                     <p><strong>Username:</strong> ${machine.username || ''}</p>
                     <p><strong>Auth:</strong> ${authType}</p>
+                    <p><strong>OS:</strong> <span id="os-info-${machine.id}" class="loading-text">Loading...</span></p>
                 </div>
                 <div class="machine-actions">
                     <button class="action-btn" onclick="app.testMachineConnection('${machine.id}')" title="Test Connection">
@@ -1288,6 +1674,85 @@ class RemoteRunApp {
                 </div>
             `;
             grid.appendChild(card);
+
+            // Load OS information asynchronously
+            this.loadMachineOSInfo(machine.id, machine.host);
+        });
+    }
+
+    async loadMachineOSInfo(machineId, machineHost) {
+        const osInfoElement = document.getElementById(`os-info-${machineId}`);
+        if (!osInfoElement) return;
+
+        try {
+            const response = await fetch('/api/machine/os-info', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ machine_id: machineId })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+
+            if (data.success && data.os_info) {
+                const osInfo = data.os_info;
+                let osDisplay = 'None';
+
+                // Try different fields to build a meaningful display
+                if (osInfo.distribution && osInfo.distribution !== 'Unknown') {
+                    osDisplay = osInfo.distribution;
+
+                    // Add kernel/version info if available and meaningful
+                    if (osInfo.kernel_version && osInfo.kernel_version !== 'Unknown') {
+                        // For Windows, kernel_version might contain version info
+                        if (osInfo.os_type === 'windows') {
+                            // Don't repeat if distribution already contains version info
+                            if (!osInfo.distribution.includes(osInfo.kernel_version)) {
+                                osDisplay += ` (${osInfo.kernel_version})`;
+                            }
+                        } else {
+                            // For Linux, show kernel version separately
+                            osDisplay += ` (${osInfo.kernel_version})`;
+                        }
+                    }
+                } else if (osInfo.os_type && osInfo.os_type !== 'Unknown') {
+                    osDisplay = osInfo.os_type.charAt(0).toUpperCase() + osInfo.os_type.slice(1);
+                } else if (osInfo.platform) {
+                    osDisplay = osInfo.platform;
+                }
+
+                osInfoElement.textContent = osDisplay;
+                osInfoElement.className = 'os-info-loaded';
+                osInfoElement.title = `OS: ${osInfo.os_type || 'Unknown'}\nDistribution: ${osInfo.distribution || 'Unknown'}\nArchitecture: ${osInfo.architecture || 'Unknown'}\nMemory: ${osInfo.total_memory || 'Unknown'}`;
+            } else {
+                osInfoElement.textContent = 'None';
+                osInfoElement.className = 'os-info-error';
+                console.warn('OS info response:', data);
+            }
+        } catch (error) {
+            console.warn(`Failed to load OS info for machine ${machineId}:`, error);
+            osInfoElement.textContent = 'None';
+            osInfoElement.className = 'os-info-error';
+        }
+    }
+
+    loadAllMachineOSInfo() {
+        // Track which machines have already been loaded to avoid repeated calls
+        if (!this.osInfoLoadedMachines) {
+            this.osInfoLoadedMachines = new Set();
+        }
+
+        this.machines.forEach(machine => {
+            // Only load OS info if not already loaded for this machine
+            if (!this.osInfoLoadedMachines.has(machine.id)) {
+                this.osInfoLoadedMachines.add(machine.id);
+                this.loadMachineOSInfo(machine.id, machine.host);
+            }
         });
     }
 
@@ -1296,7 +1761,8 @@ class RemoteRunApp {
             'command-machine-select',
             'python-machine-select',
             'ansible-machine-select',
-            'terraform-machine-select'
+            'terraform-machine-select',
+            'docker-machine-select'
         ];
 
         selects.forEach(selectId => {
@@ -1313,12 +1779,17 @@ class RemoteRunApp {
             defaultOption.textContent = 'Choose a machine...';
             select.appendChild(defaultOption);
 
-            // Add Local option for Terraform
+            // Add Local/Localhost option for Terraform and Docker
             if (selectId === 'terraform-machine-select') {
                 const localOption = document.createElement('option');
                 localOption.value = 'local';
                 localOption.textContent = 'Local (Dashboard Host)';
                 select.appendChild(localOption);
+            } else if (selectId === 'docker-machine-select') {
+                const localhostOption = document.createElement('option');
+                localhostOption.value = 'localhost';
+                localhostOption.textContent = 'Localhost (Dashboard Host)';
+                select.appendChild(localhostOption);
             }
 
             this.machines.forEach(machine => {
@@ -1328,15 +1799,25 @@ class RemoteRunApp {
                 select.appendChild(option);
             });
 
-            // Restore previous selection if the machine still exists or is 'local'
+            // Restore previous selection if the machine still exists or is 'local'/'localhost'
             if (selectId === 'terraform-machine-select' && (!prevValue || prevValue === 'local')) {
                 // Default to Local for Terraform
                 select.value = 'local';
-            } else if (prevValue && (prevValue === 'local' || this.machines.some(m => m.id === prevValue))) {
+            } else if (selectId === 'docker-machine-select' && prevValue === 'localhost') {
+                // Only restore localhost for Docker if it was previously selected
+                select.value = 'localhost';
+            } else if (prevValue && (prevValue === 'local' || prevValue === 'localhost' || this.machines.some(m => m.id === prevValue))) {
                 select.value = prevValue;
             } else {
-                // Set to empty (default option) for non-terraform or Local for terraform
-                select.value = selectId === 'terraform-machine-select' ? 'local' : '';
+                // Set to default based on type
+                if (selectId === 'terraform-machine-select') {
+                    select.value = 'local';
+                } else if (selectId === 'docker-machine-select') {
+                    // Keep default "Choose a machine..." option for Docker
+                    select.value = '';
+                } else {
+                    select.value = '';
+                }
             }
         });
     } async saveMachine() {
@@ -1484,9 +1965,6 @@ class RemoteRunApp {
             return;
         }
 
-        this.startExecution('command');
-        this.showLoading();
-
         try {
             const response = await fetch('/api/execute-command', {
                 method: 'POST',
@@ -1503,21 +1981,13 @@ class RemoteRunApp {
             const result = await response.json();
 
             if (result.success) {
-                this.addLog(`Command executed successfully`, 'success');
-                this.addLog(`Output: ${result.output}`, 'info');
-                this.endExecution(true);
+                this.addLog(`Command execution started: ${result.execution_id}`, 'info');
+                // No need to show loading overlay - execution runs in background
             } else {
-                this.addLog(`Command failed: ${result.message}`, 'error');
-                this.endExecution(false);
+                this.addLog(`Failed to start command execution: ${result.message}`, 'error');
             }
-            // Refresh dashboard stats and history after execution
-            this.loadDashboardStats();
-            this.loadDashboardHistory();
         } catch (error) {
-            this.addLog('Failed to execute command', 'error');
-            this.endExecution(false);
-        } finally {
-            this.hideLoading();
+            this.addLog('Failed to start command execution', 'error');
         }
     }
 
@@ -1538,10 +2008,17 @@ class RemoteRunApp {
         const activeTab = document.querySelector('#python-section .tab-btn.active').dataset.tab;
         let scriptContent = '';
         let filename = '';
+        let timeout = 60; // Default timeout
 
         if (activeTab === 'editor') {
             scriptContent = document.getElementById('python-editor').value;
             filename = document.getElementById('python-filename').value || 'script.py';
+
+            // Get timeout value from input
+            const timeoutInput = document.getElementById('python-timeout');
+            if (timeoutInput && timeoutInput.value) {
+                timeout = parseInt(timeoutInput.value) || 60;
+            }
         } else if (activeTab === 'upload') {
             const fileInput = document.getElementById('python-file-input');
             if (fileInput.files.length === 0) {
@@ -1555,9 +2032,6 @@ class RemoteRunApp {
             return;
         }
 
-        this.startExecution('python');
-        this.showLoading();
-
         try {
             const response = await fetch('/api/run-python', {
                 method: 'POST',
@@ -1567,27 +2041,21 @@ class RemoteRunApp {
                 body: JSON.stringify({
                     machine_id: machineId,
                     script_content: scriptContent,
-                    filename: filename
+                    filename: filename,
+                    timeout: timeout
                 })
             });
 
             const result = await response.json();
 
             if (result.success) {
-                this.addLog(`Python script executed successfully`, 'success');
-                this.addLog(`Output: ${result.output}`, 'info');
-                this.endExecution(true);
+                this.addLog(`Python script execution started: ${result.execution_id} (timeout: ${timeout}s)`, 'info');
+                // No need to show loading overlay - execution runs in background
             } else {
-                this.addLog(`Python script failed: ${result.message || 'Unknown error'}`, 'error');
-                alert('Failed to run Python script: ' + (result.message || 'Unknown error'));
-                this.endExecution(false);
+                this.addLog(`Failed to start Python script execution: ${result.message}`, 'error');
             }
         } catch (error) {
-            this.addLog('Failed to run Python script: ' + (error.message || error), 'error');
-            alert('Failed to run Python script: ' + (error.message || error));
-            this.endExecution(false);
-        } finally {
-            this.hideLoading();
+            this.addLog('Failed to start Python script execution', 'error');
         }
     }
 
@@ -1963,6 +2431,69 @@ class RemoteRunApp {
         }
     }
 
+    async saveDockerScript() {
+        const scriptContent = document.getElementById('docker-editor').value;
+        const filename = document.getElementById('docker-filename').value;
+
+        if (!scriptContent || !filename) {
+            alert('Please enter script content and filename');
+            return;
+        }
+
+        try {
+            let response;
+
+            // Check if we're editing a directory file
+            if (this.editingContext && this.editingContext.isDirectoryFile && this.editingContext.type === 'docker') {
+                // Save to directory using directory API
+                const { directory } = this.editingContext;
+                response = await fetch(`/api/directories/docker/${directory}/files/${filename}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ content: scriptContent })
+                });
+
+                if (response.ok) {
+                    this.addLog(`Docker script saved to directory '${directory}': ${filename}`, 'success');
+                    // Update editing context
+                    this.editingContext.originalContent = scriptContent;
+                    this.updateTabName('docker-tab-name', `${filename} (saved)`);
+                    // Refresh directory contents
+                    this.loadDirectoryContents('docker', directory);
+                } else {
+                    const error = await response.json();
+                    alert(`Failed to save to directory: ${error.error}`);
+                }
+            } else {
+                // Save as regular script file
+                response = await fetch('/api/save-script', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        type: 'docker',
+                        filename: filename,
+                        content: scriptContent
+                    })
+                });
+
+                if (response.ok) {
+                    this.addLog(`Docker script saved: ${filename}`, 'success');
+                    this.loadExistingFiles('docker');
+                } else {
+                    const error = await response.json();
+                    alert(`Failed to save script: ${error.error}`);
+                }
+            }
+        } catch (error) {
+            this.addLog('Failed to save Docker script: ' + (error.message || error), 'error');
+            alert('Failed to save Docker script: ' + (error.message || error));
+        }
+    }
+
     clearAnsible() {
         // Clear playbook editor fields
         document.getElementById('ansible-editor').value = '';
@@ -2004,6 +2535,63 @@ class RemoteRunApp {
         this.updateTabName('terraform-tab-name', 'main.tf');
     }
 
+    clearDocker() {
+        document.getElementById('docker-editor').value = '';
+        document.getElementById('docker-filename').value = '';
+        this.updateLineNumbers('docker-editor');
+        this.updateTabName('docker-tab-name', 'docker-compose.yml');
+    }
+
+    async runDockerScript() {
+        const scriptContent = document.getElementById('docker-editor').value.trim();
+        const machineId = document.getElementById('docker-machine-select').value;
+
+        if (!scriptContent) {
+            alert('Please enter Docker content in the editor');
+            return;
+        }
+
+        if (!machineId) {
+            alert('Please select a machine');
+            return;
+        }
+
+        try {
+            this.startExecution('docker_editor');
+            this.showLoading();
+
+            const response = await fetch('/api/docker/compose/up', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    compose_content: scriptContent,
+                    detach: true,
+                    build: false
+                })
+            });
+
+            const result = await response.json();
+
+            this.displayOutput('logs-content', {
+                success: result.success,
+                output: `Docker Execution Result:\n\n${result.output}`,
+                error: result.errors
+            });
+
+            if (result.success) {
+                this.addLog(`✅ Docker script executed successfully`, 'success');
+            } else {
+                this.addLog(`❌ Failed to run Docker script: ${result.errors || result.error}`, 'error');
+            }
+        } catch (error) {
+            this.addLog(`Error running Docker script: ${error.message}`, 'error');
+        } finally {
+            this.endExecution(true);
+            this.hideLoading();
+        }
+    }
+
     handleFileUpload(files, acceptedTypes) {
         files.forEach(file => {
             const extension = '.' + file.name.split('.').pop().toLowerCase();
@@ -2024,12 +2612,25 @@ class RemoteRunApp {
                         // Switch to editor tab
                         document.querySelector('[data-tab="editor"]').click();
                     } else if (extension === '.yml' || extension === '.yaml') {
-                        document.getElementById('ansible-editor').value = content;
-                        document.getElementById('ansible-filename').value = file.name;
-                        this.updateLineNumbers('ansible-editor');
-                        this.updateTabName('ansible-tab-name', file.name);
-                        // Switch to editor tab
-                        document.querySelector('[data-tab="editor-ansible"]').click();
+                        // Check if it's a docker-compose file
+                        const isDockerCompose = file.name.toLowerCase().includes('docker-compose') ||
+                            file.name.toLowerCase().includes('compose');
+
+                        if (isDockerCompose) {
+                            document.getElementById('docker-editor').value = content;
+                            document.getElementById('docker-filename').value = file.name;
+                            this.updateLineNumbers('docker-editor');
+                            this.updateTabName('docker-tab-name', file.name);
+                            // Switch to docker editor tab
+                            document.querySelector('[data-tab="editor-docker"]').click();
+                        } else {
+                            document.getElementById('ansible-editor').value = content;
+                            document.getElementById('ansible-filename').value = file.name;
+                            this.updateLineNumbers('ansible-editor');
+                            this.updateTabName('ansible-tab-name', file.name);
+                            // Switch to editor tab
+                            document.querySelector('[data-tab="editor-ansible"]').click();
+                        }
                     } else if (extension === '.tf' || extension === '.tfvars') {
                         document.getElementById('terraform-editor').value = content;
                         document.getElementById('terraform-filename').value = file.name;
@@ -2037,6 +2638,15 @@ class RemoteRunApp {
                         this.updateTabName('terraform-tab-name', file.name);
                         // Switch to editor tab
                         document.querySelector('[data-tab="editor-tf"]').click();
+                    } else if (file.name.toLowerCase().match(/^dockerfile/i) ||
+                        file.name.toLowerCase().includes('dockerfile')) {
+                        // Handle Dockerfile
+                        document.getElementById('docker-editor').value = content;
+                        document.getElementById('docker-filename').value = file.name;
+                        this.updateLineNumbers('docker-editor');
+                        this.updateTabName('docker-tab-name', file.name);
+                        // Switch to docker editor tab
+                        document.querySelector('[data-tab="editor-docker"]').click();
                     }
                 };
                 reader.readAsText(file);
@@ -2152,6 +2762,12 @@ class RemoteRunApp {
                     this.updateLineNumbers('terraform-editor');
                     this.updateTabName('terraform-tab-name', data.name);
                     document.querySelector('[data-tab="editor-tf"]').click();
+                } else if (type === 'docker') {
+                    document.getElementById('docker-editor').value = data.content;
+                    document.getElementById('docker-filename').value = data.name;
+                    this.updateLineNumbers('docker-editor');
+                    this.updateTabName('docker-tab-name', data.name);
+                    document.querySelector('[data-tab="editor-docker"]').click();
                 }
 
                 this.addLog(`File loaded: ${data.name}`, 'success');
@@ -2628,11 +3244,12 @@ class RemoteRunApp {
 
     // --- Directory Management Methods ---
     initDirectoryManagement() {
-        // Initialize directory management for python, ansible and terraform
+        // Initialize directory management for python, ansible, terraform and docker
         this.currentDirectories = {
             python: null,
             ansible: null,
-            terraform: null
+            terraform: null,
+            docker: null
         };
 
         // Python directory management
@@ -2643,6 +3260,9 @@ class RemoteRunApp {
 
         // Terraform directory management  
         this.setupDirectoryManagement('terraform');
+
+        // Docker directory management
+        this.setupDirectoryManagement('docker');
 
         // Setup enhanced project execution
         this.setupProjectExecution();
@@ -2998,15 +3618,63 @@ class RemoteRunApp {
     }
 
     updateFileSelector(type, files) {
-        const selector = document.getElementById(`${type}-selected-file`);
-        selector.innerHTML = '<option value="">Select a file...</option>';
+        // Handle different selector IDs for different types
+        let selectorId;
+        if (type === 'docker') {
+            selectorId = `${type}-main-file`;
+        } else {
+            selectorId = `${type}-selected-file`;
+        }
 
+        const selector = document.getElementById(selectorId);
+        if (!selector) {
+            return; // Selector doesn't exist for this type
+        }
+
+        // Clear and set default option
+        if (type === 'docker') {
+            selector.innerHTML = '<option value="">Select docker-compose.yml or Dockerfile...</option>';
+        } else {
+            selector.innerHTML = '<option value="">Select a file...</option>';
+        }
+
+        // Add files as options
         files.forEach(file => {
             const option = document.createElement('option');
             option.value = file.name;
             option.textContent = file.name;
             selector.appendChild(option);
         });
+
+        // For Docker, auto-detect and select main file if possible
+        if (type === 'docker') {
+            this.autoSelectDockerMainFile(files);
+        }
+    }
+
+    autoSelectDockerMainFile(files) {
+        const selector = document.getElementById('docker-main-file');
+        if (!selector) return;
+
+        // Look for docker-compose files first (higher priority)
+        const composeFiles = files.filter(file =>
+            file.name.match(/^(docker-)?compose\.(yml|yaml)$/i)
+        );
+
+        if (composeFiles.length > 0) {
+            selector.value = composeFiles[0].name;
+            return;
+        }
+
+        // Look for Dockerfile
+        const dockerfiles = files.filter(file =>
+            file.name.match(/^dockerfile$/i) || file.name.startsWith('Dockerfile')
+        );
+
+        if (dockerfiles.length > 0) {
+            selector.value = dockerfiles[0].name;
+            return;
+        }
     }
 
     selectDirectoryFile(type, filename, fileItem) {
@@ -3229,59 +3897,81 @@ class RemoteRunApp {
             // Switch to editor tab
             const editorTabSelector = type === 'python' ? `#${type}-section [data-tab="editor"]` :
                 type === 'ansible' ? `#${type}-section [data-tab="editor-ansible"]` :
-                    `#${type}-section [data-tab="editor-tf"]`;
+                    type === 'terraform' ? `#${type}-section [data-tab="editor-tf"]` :
+                        type === 'docker' ? `#${type}-section [data-tab="editor-docker"]` :
+                            `#${type}-section [data-tab="editor-tf"]`;
+
+            console.log('Looking for editor tab with selector:', editorTabSelector);
             const editorTab = document.querySelector(editorTabSelector);
             if (editorTab) {
                 editorTab.click();
+                this.addLog(`Switched to ${type} editor tab`, 'info');
             } else {
-                this.addLog(`Warning: Could not find editor tab for ${type}`, 'warning');
+                this.addLog(`Warning: Could not find editor tab for ${type} with selector: ${editorTabSelector}`, 'warning');
+                // Try alternative approach - look for the tab button directly
+                const dockerEditorTab = document.querySelector('[data-tab="editor-docker"]');
+                if (dockerEditorTab && type === 'docker') {
+                    dockerEditorTab.click();
+                    this.addLog(`Found and clicked Docker editor tab using alternative method`, 'info');
+                }
             }
 
-            // Small delay to ensure tab switching is complete
-            setTimeout(() => {
-                // Set the content in the editor
-                const editorId = `${type}-editor`;
-                const editor = document.getElementById(editorId);
-                if (editor) {
-                    editor.value = fileData.content;
-                    this.updateLineNumbers(editorId);
-                    this.autoResizeEditor(editorId);
+            // Wait for the editor to be available with retries
+            await this.waitForEditor(type, fileData, dirName, filename);
 
-                    // CRITICAL FIX: Set the filename in the filename input field
-                    const filenameInputId = `${type}-filename`;
-                    const filenameInput = document.getElementById(filenameInputId);
-                    if (filenameInput) {
-                        filenameInput.value = filename;
-                        this.addLog(`Set filename in input field: ${filename}`, 'info');
-                    } else {
-                        this.addLog(`Warning: Could not find filename input field: ${filenameInputId}`, 'warning');
-                    }
-
-                    // Update tab name to show we're editing a file
-                    this.updateTabName(`${type}-tab-name`, `${filename} (editing)`);
-
-                    // Store editing context
-                    this.editingContext = {
-                        type: type,
-                        directory: dirName,
-                        filename: filename,
-                        originalContent: fileData.content,
-                        isDirectoryFile: true // Flag to indicate this is a directory file edit
-                    };
-
-                    // Add save button specifically for editing
-                    this.showEditingSaveButton(type);
-
-                    this.addLog(`Loaded '${filename}' for editing from directory '${dirName}'`, 'success');
-                } else {
-                    this.addLog(`Error: Could not find editor for ${type}`, 'error');
-                    alert(`Error: Could not find editor for ${type}. Please ensure the section is loaded properly.`);
-                }
-            }, 100);
         } catch (error) {
             this.addLog(`Error loading file for editing: ${error.message}`, 'error');
             alert(`Error loading file for editing: ${error.message}`);
         }
+    }
+
+    async waitForEditor(type, fileData, dirName, filename, maxRetries = 5) {
+        const editorId = `${type}-editor`;
+
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 100 + (attempt * 100))); // Increasing delay
+
+            const editor = document.getElementById(editorId);
+            if (editor) {
+                editor.value = fileData.content;
+                this.updateLineNumbers(editorId);
+                this.autoResizeEditor(editorId);
+
+                // Set the filename in the filename input field
+                const filenameInputId = `${type}-filename`;
+                const filenameInput = document.getElementById(filenameInputId);
+                if (filenameInput) {
+                    filenameInput.value = filename;
+                    this.addLog(`Set filename in input field: ${filename}`, 'info');
+                } else {
+                    this.addLog(`Warning: Could not find filename input field: ${filenameInputId}`, 'warning');
+                }
+
+                // Update tab name to show we're editing a file
+                this.updateTabName(`${type}-tab-name`, `${filename} (editing)`);
+
+                // Store editing context
+                this.editingContext = {
+                    type: type,
+                    directory: dirName,
+                    filename: filename,
+                    originalContent: fileData.content,
+                    isDirectoryFile: true // Flag to indicate this is a directory file edit
+                };
+
+                // Add save button specifically for editing
+                this.showEditingSaveButton(type);
+
+                this.addLog(`Loaded '${filename}' for editing from directory '${dirName}' (attempt ${attempt + 1})`, 'success');
+                return;
+            }
+
+            this.addLog(`Editor for ${type} not found on attempt ${attempt + 1}, retrying...`, 'warning');
+        }
+
+        // If we get here, all retries failed
+        this.addLog(`Error: Could not find editor for ${type} after ${maxRetries} attempts. Please ensure the section is loaded properly.`, 'error');
+        alert(`Error: Could not find editor for ${type}. Please ensure the section is loaded properly.`);
     }
 
     showEditingSaveButton(type) {
@@ -3474,23 +4164,12 @@ class RemoteRunApp {
             return;
         }
 
-        // Show execution status
-        const statusElement = document.getElementById(`${type}-execution-status`);
-        if (statusElement) {
-            statusElement.style.display = 'block';
-            statusElement.querySelector('span').textContent =
-                `Executing ${filesToExecute.length} file${filesToExecute.length > 1 ? 's' : ''}...`;
-        }
+        this.addLog(`🚀 Starting execution of ${filesToExecute.length} file(s) from ${dirName} directory...`, 'info');
 
-        this.showLoading();
-        this.addLog(`Executing ${filesToExecute.length} file(s) from ${dirName} directory...`, 'info');
-
-        let successCount = 0;
-        let failCount = 0;
-
+        // Execute files sequentially but in background
         for (const filename of filesToExecute) {
             try {
-                this.addLog(`Executing: ${filename}`, 'info');
+                this.addLog(`▶️ Starting: ${filename}`, 'info');
 
                 const response = await fetch(`/api/execute-directory/${type}`, {
                     method: 'POST',
@@ -3508,42 +4187,16 @@ class RemoteRunApp {
                 const result = await response.json();
 
                 if (result.success) {
-                    successCount++;
-                    this.addLog(`✓ ${filename} executed successfully in ${result.execution_time?.toFixed(2) || 'N/A'}s`, 'success');
-                    if (result.output) {
-                        this.addLog(`Output: ${result.output}`, 'info');
-                    }
+                    this.addLog(`✅ ${filename} execution started: ${result.execution_id}`, 'info');
                 } else {
-                    failCount++;
-                    this.addLog(`✗ ${filename} execution failed: ${result.error}`, 'error');
+                    this.addLog(`❌ Failed to start ${filename} execution: ${result.error}`, 'error');
                 }
             } catch (error) {
-                failCount++;
-                this.addLog(`✗ Error executing ${filename}: ${error.message}`, 'error');
+                this.addLog(`❌ Error starting ${filename} execution: ${error.message}`, 'error');
             }
         }
 
-        // Hide execution status
-        if (statusElement) {
-            statusElement.style.display = 'none';
-        }
-
-        // Show summary
-        const totalFiles = filesToExecute.length;
-        if (successCount === totalFiles) {
-            this.addLog(`🎉 All ${totalFiles} file(s) executed successfully!`, 'success');
-        } else if (successCount > 0) {
-            this.addLog(`⚠️ Execution completed: ${successCount} succeeded, ${failCount} failed`, 'warning');
-        } else {
-            this.addLog(`❌ All executions failed`, 'error');
-            alert(`All file executions failed. Check the logs for details.`);
-        }
-
-        // Refresh dashboard stats and history
-        this.loadDashboardStats();
-        this.loadDashboardHistory();
-
-        this.hideLoading();
+        this.addLog(`📋 All ${filesToExecute.length} file(s) submitted for execution. Check Dashboard for progress.`, 'info');
     }
 
     async executeTerraformDirectoryAction(action) {
@@ -3595,6 +4248,11 @@ class RemoteRunApp {
 
     // --- Enhanced Project Execution Methods ---
     async executeProject(projectType) {
+        // Handle Docker project execution differently
+        if (projectType === 'docker') {
+            return this.executeDockerProject();
+        }
+
         const dirName = this.currentDirectories[projectType];
         if (!dirName) {
             alert(`No ${projectType} directory selected`);
@@ -3669,10 +4327,6 @@ class RemoteRunApp {
             }
         }
 
-        this.showLoading();
-        this.startExecution('project'); // Start execution tracking and auto-open logs
-        this.addLog(`Executing ${projectType} project: ${dirName}${mainFile ? ` (main: ${mainFile})` : ''}...`, 'info');
-
         try {
             const payload = {
                 project_type: projectType,
@@ -3695,46 +4349,26 @@ class RemoteRunApp {
             const result = await response.json();
 
             if (result.success) {
-                this.addLog(`✓ Project execution completed successfully`, 'success');
-                this.addLog(`Main file: ${result.main_file}`, 'info');
-                this.addLog(`Execution location: ${result.execution_location}`, 'info');
-                if (result.execution_time) {
-                    this.addLog(`Execution time: ${result.execution_time.toFixed(2)}s`, 'info');
-                }
-                if (result.output) {
-                    this.addLog(`Output:\n${result.output}`, 'success');
-                }
-
-                // Refresh dashboard stats
-                if (this.currentSection === 'dashboard') {
-                    this.loadDashboardStats();
-                    this.loadDashboardHistory();
-                }
-
-                this.endExecution(true); // End execution successfully
-
+                this.addLog(`🚀 ${projectType.toUpperCase()} project execution started: ${result.execution_id}`, 'info');
+                this.addLog(`📁 Project: ${dirName}${mainFile ? ` (main: ${mainFile})` : ''}`, 'info');
+                // No loading overlay or endExecution - execution runs in background
             } else {
-                this.addLog(`✗ Project execution failed: ${result.message || result.error}`, 'error');
-                if (result.output) {
-                    this.addLog(`Output: ${result.output}`, 'info');
-                }
-                if (result.error) {
-                    this.addLog(`Error: ${result.error}`, 'error');
-                }
-                alert(`Project execution failed: ${result.message || result.error}`);
-                this.endExecution(false); // End execution with failure
+                this.addLog(`❌ Failed to start ${projectType} project execution: ${result.message}`, 'error');
+                alert(`Failed to start project execution: ${result.message}`);
             }
 
         } catch (error) {
-            this.addLog(`Error executing project: ${error.message}`, 'error');
-            alert(`Failed to execute project: ${error.message}`);
-            this.endExecution(false); // End execution with failure
-        } finally {
-            this.hideLoading();
+            this.addLog(`❌ Error starting ${projectType} project execution: ${error.message}`, 'error');
+            alert(`Failed to start project execution: ${error.message}`);
         }
     }
 
     async detectMainFile(projectType) {
+        // Handle Docker project type differently
+        if (projectType === 'docker') {
+            return this.detectDockerMainFile();
+        }
+
         const dirName = this.currentDirectories[projectType];
         if (!dirName) {
             alert(`No ${projectType} directory selected`);
@@ -3799,7 +4433,7 @@ class RemoteRunApp {
 
     setupProjectExecution() {
         // Setup project execution for each type
-        ['python', 'ansible', 'terraform'].forEach(type => {
+        ['python', 'ansible', 'terraform', 'docker'].forEach(type => {
             // Execute project button
             const executeBtn = document.getElementById(`${type}-execute-project-btn`);
             if (executeBtn) {
@@ -3851,6 +4485,19 @@ class RemoteRunApp {
                             extraArgsInput.style.display = 'block';
                         }
                     });
+                }
+            }
+
+            // For Docker, handle project action buttons
+            if (type === 'docker') {
+                const stopProjectBtn = document.getElementById('docker-stop-project-btn');
+                if (stopProjectBtn) {
+                    stopProjectBtn.addEventListener('click', () => this.executeDockerProjectAction('stop'));
+                }
+
+                const downProjectBtn = document.getElementById('docker-down-project-btn');
+                if (downProjectBtn) {
+                    downProjectBtn.addEventListener('click', () => this.executeDockerProjectAction('down'));
                 }
             }
         });
@@ -4741,38 +5388,70 @@ class RemoteRunApp {
             if (result.success) {
                 const debug = result.debug_info;
 
+                // Build detailed output for Live Logs display
+                let debugOutput = `Container Debug Results:\n\nIdentifier: ${debug.identifier}\n`;
+                debugOutput += `Is Container: ${debug.is_container ? '✅ YES' : '❌ NO'}\n`;
+                debugOutput += `Is Image: ${debug.is_image ? '✅ YES' : '❌ NO'}\n\n`;
+
                 this.addLog(`🔍 Debug Results for: ${debug.identifier}`, 'info');
                 this.addLog(`📦 Is Container: ${debug.is_container ? '✅ YES' : '❌ NO'}`, 'info');
                 this.addLog(`🖼️ Is Image: ${debug.is_image ? '✅ YES' : '❌ NO'}`, 'info');
 
                 if (debug.is_container) {
+                    debugOutput += `Container Status: ${debug.container_status}\n`;
+                    debugOutput += `Container Name: ${debug.container_name}\n\n`;
                     this.addLog(`📊 Container Status: ${debug.container_status}`, 'info');
                     this.addLog(`🏷️ Container Name: ${debug.container_name}`, 'info');
                 }
 
                 if (debug.is_image && debug.containers_from_image.length > 0) {
+                    debugOutput += `Containers from this image:\n`;
                     this.addLog(`📋 Containers from this image:`, 'info');
                     debug.containers_from_image.forEach(container => {
+                        debugOutput += `  - ${container.id} (${container.name}) - ${container.status}\n`;
                         this.addLog(`   └─ ${container.id} (${container.name}) - ${container.status}`, 'info');
                     });
+                    debugOutput += `\n`;
                 }
 
                 if (debug.recommendations.length > 0) {
+                    debugOutput += `Recommendations:\n`;
                     this.addLog(`💡 Recommendations:`, 'info');
                     debug.recommendations.forEach(rec => {
+                        debugOutput += `  - ${rec}\n`;
                         this.addLog(`   └─ ${rec}`, 'info');
                     });
+                    debugOutput += `\n`;
                 }
 
                 // Additional troubleshooting
                 if (!debug.is_container && !debug.is_image) {
+                    debugOutput += `❌ "${debug.identifier}" is neither a valid container nor image ID\n`;
+                    debugOutput += `💡 Try using 'docker ps -a' to find correct container IDs\n`;
+                    debugOutput += `💡 Try using 'docker images' to find correct image IDs\n`;
+
                     this.addLog(`❌ "${debug.identifier}" is neither a valid container nor image ID`, 'error');
                     this.addLog(`💡 Try using 'docker ps -a' to find correct container IDs`, 'info');
                     this.addLog(`💡 Try using 'docker images' to find correct image IDs`, 'info');
                 }
 
+                // Display output in Live Logs and auto-open
+                this.displayOutput('logs-content', {
+                    success: true,
+                    output: debugOutput
+                });
+                this.autoOpenLogs();
+
             } else {
                 this.addLog(`❌ Debug failed: ${result.error}`, 'error');
+
+                // Display error in Live Logs and auto-open
+                this.displayOutput('logs-content', {
+                    success: false,
+                    output: `Container Debug Failed:\n\nIdentifier: ${containerId}\nStatus: Failed`,
+                    error: result.error
+                });
+                this.autoOpenLogs();
             }
         } catch (error) {
             this.addLog(`❌ Debug error: ${error.message}`, 'error');
@@ -4871,14 +5550,29 @@ class RemoteRunApp {
             this.addLog(`Container ${action} response: ${JSON.stringify(result)}`, 'info');
 
             if (result.success) {
+                let outputMsg = `Container ${action.toUpperCase()} Result:\n\nContainer ID: ${containerId}\nAction: ${action}\n`;
+
                 if (action === 'start') {
                     this.addLog(`✅ Container started successfully: ${containerId}`, 'success');
+                    outputMsg += `Status: Successfully started\n`;
                     if (result.output) {
                         this.addLog(`Output: ${result.output}`, 'info');
+                        outputMsg += `\nOutput:\n${result.output}`;
                     }
                 } else {
                     this.addLog(`✅ Container ${action} successful: ${containerId}`, 'success');
+                    outputMsg += `Status: Successfully ${action}ed\n`;
+                    if (result.output) {
+                        outputMsg += `\nOutput:\n${result.output}`;
+                    }
                 }
+
+                // Display output in Live Logs and auto-open
+                this.displayOutput('logs-content', {
+                    success: true,
+                    output: outputMsg
+                });
+                this.autoOpenLogs();
 
                 // Refresh containers list to show updated status
                 setTimeout(() => {
@@ -4892,6 +5586,14 @@ class RemoteRunApp {
             } else {
                 const errorMsg = result.errors || result.error || 'Unknown error';
                 this.addLog(`❌ Container ${action} failed: ${errorMsg}`, 'error');
+
+                // Display error in Live Logs and auto-open
+                this.displayOutput('logs-content', {
+                    success: false,
+                    output: `Container ${action.toUpperCase()} Failed:\n\nContainer ID: ${containerId}\nAction: ${action}\nStatus: Failed`,
+                    error: errorMsg
+                });
+                this.autoOpenLogs();
 
                 // Additional troubleshooting info
                 if (action === 'start') {
@@ -5339,13 +6041,17 @@ class RemoteRunApp {
 
     async executeDockerCompose() {
         const composeContent = document.getElementById('compose-content').value.trim();
-        const composeFile = document.getElementById('compose-filename').value.trim() || 'docker-compose.yml';
         const detached = document.getElementById('compose-detached').checked;
         const build = document.getElementById('compose-build').checked;
         const machineId = document.getElementById('docker-machine-select').value;
 
-        if (!composeContent || !machineId) {
-            this.addLog('Please enter compose file content and select a machine', 'error');
+        if (!composeContent) {
+            this.addLog('Please enter compose file content', 'error');
+            return;
+        }
+
+        if (!machineId) {
+            this.addLog('Please select a machine', 'error');
             return;
         }
 
@@ -5359,7 +6065,6 @@ class RemoteRunApp {
                 body: JSON.stringify({
                     machine_id: machineId,
                     compose_content: composeContent,
-                    compose_file: composeFile,
                     detach: detached,
                     build: build
                 })
@@ -5374,14 +6079,14 @@ class RemoteRunApp {
             });
 
             if (result.success) {
-                this.addLog('Docker compose executed successfully', 'success');
+                this.addLog(`✅ Docker compose executed successfully`, 'success');
                 // Refresh containers list to show new containers
                 this.refreshDockerContainers();
 
-                // Clear the compose content
+                // Clear the compose content after successful execution
                 document.getElementById('compose-content').value = '';
             } else {
-                this.addLog(`Failed to run docker compose: ${result.errors || result.error}`, 'error');
+                this.addLog(`❌ Failed to run docker compose: ${result.errors || result.error}`, 'error');
             }
         } catch (error) {
             this.addLog(`Error running docker compose: ${error.message}`, 'error');
@@ -5390,6 +6095,8 @@ class RemoteRunApp {
             this.hideLoading();
         }
     }
+
+
 
     async executeSystemPrune() {
         const allUnused = document.getElementById('prune-all').checked;
@@ -5457,6 +6164,765 @@ class RemoteRunApp {
             this.hideLoading();
         }
     }
+
+    // === DOCKER PROJECT EXECUTION METHODS ===
+
+    async executeDockerProject() {
+        const dirName = this.currentDirectories['docker'];
+        if (!dirName) {
+            alert('No Docker project directory selected');
+            return;
+        }
+
+        const machineId = document.getElementById('docker-machine-select').value;
+        const mainFile = document.getElementById('docker-main-file').value;
+
+        // Get Docker options
+        const detached = document.getElementById('docker-project-detached').checked;
+        const build = document.getElementById('docker-project-build').checked;
+        const forceRecreate = document.getElementById('docker-project-force-recreate').checked;
+        const removeOrphans = document.getElementById('docker-project-remove-orphans').checked;
+
+        if (!machineId) {
+            alert('Please select a machine');
+            return;
+        }
+
+        try {
+            this.startExecution('docker_project_up');
+            this.showLoading();
+
+            // Show starting notification
+            this.showNotification(`Starting Docker project: ${dirName}`, 'info', 4000);
+
+            const payload = {
+                directory_name: dirName,
+                compose_file: mainFile || null,
+                machine_id: machineId,
+                detach: detached,
+                build: build,
+                force_recreate: forceRecreate,
+                remove_orphans: removeOrphans,
+                action: 'up'
+            };
+
+            const response = await fetch('/api/docker/project/execute', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+
+            this.displayOutput('logs-content', {
+                success: result.success,
+                output: `Docker Project Up Result:\n\nProject: ${dirName}${mainFile ? ` (compose: ${mainFile})` : ''}\nAction: ${result.action || 'up'}\n\n${result.output || 'No output'}`,
+                error: result.error
+            });
+
+            if (result.success) {
+                this.addLog(`🐳 Docker project started successfully: ${dirName}`, 'success');
+                this.addLog(`📁 Project: ${dirName}${mainFile ? ` (compose: ${mainFile})` : ''}`, 'info');
+                this.addLog(`📋 Action: ${result.action}`, 'info');
+                if (result.output) {
+                    this.addLog(`✅ Output: ${result.output}`, 'info');
+                }
+
+                // Show success notification
+                this.showNotification(`Docker project started successfully: ${dirName}`, 'success', 6000);
+            } else {
+                this.addLog(`❌ Failed to start Docker project: ${result.error}`, 'error');
+                alert(`Failed to start Docker project: ${result.error}`);
+
+                // Show error notification
+                this.showNotification(`Failed to start Docker project: ${result.error}`, 'error', 8000);
+            }
+
+        } catch (error) {
+            this.addLog(`❌ Error starting Docker project: ${error.message}`, 'error');
+            alert(`Failed to start Docker project: ${error.message}`);
+
+            // Show error notification
+            this.showNotification(`Error starting Docker project: ${error.message}`, 'error', 8000);
+        } finally {
+            this.endExecution(true);
+            this.hideLoading();
+        }
+    }
+
+    async executeDockerProjectAction(action) {
+        const dirName = this.currentDirectories['docker'];
+        if (!dirName) {
+            alert('No Docker project directory selected');
+            return;
+        }
+
+        const machineId = document.getElementById('docker-machine-select').value;
+        const mainFile = document.getElementById('docker-main-file').value;
+
+        // Get Docker options
+        const detached = document.getElementById('docker-project-detached').checked;
+        const build = document.getElementById('docker-project-build').checked;
+        const forceRecreate = document.getElementById('docker-project-force-recreate').checked;
+        const removeOrphans = document.getElementById('docker-project-remove-orphans').checked;
+
+        if (!machineId) {
+            alert('Please select a machine');
+            return;
+        }
+
+        try {
+            this.startExecution(`docker_project_${action}`);
+            this.showLoading();
+
+            // Show starting notification
+            this.showNotification(`Starting Docker project ${action}: ${dirName}`, 'info', 4000);
+
+            const payload = {
+                directory_name: dirName,
+                compose_file: mainFile || null,
+                machine_id: machineId,
+                detach: detached,
+                build: build,
+                force_recreate: forceRecreate,
+                remove_orphans: removeOrphans,
+                action: action
+            };
+
+            const response = await fetch('/api/docker/project/execute', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+
+            this.displayOutput('logs-content', {
+                success: result.success,
+                output: `Docker Project ${action.toUpperCase()} Result:\n\nProject: ${dirName}${mainFile ? ` (compose: ${mainFile})` : ''}\nAction: ${result.action || action}\n\n${result.output || 'No output'}`,
+                error: result.error
+            });
+
+            if (result.success) {
+                this.addLog(`🐳 Docker project ${action} completed: ${dirName}`, 'success');
+                this.addLog(`📁 Project: ${dirName}${mainFile ? ` (compose: ${mainFile})` : ''}`, 'info');
+                this.addLog(`📋 Action: ${result.action}`, 'info');
+                if (result.output) {
+                    this.addLog(`✅ Output: ${result.output}`, 'info');
+                }
+
+                // Show success notification
+                this.showNotification(`Docker project ${action} completed successfully: ${dirName}`, 'success', 6000);
+            } else {
+                this.addLog(`❌ Failed to ${action} Docker project: ${result.error}`, 'error');
+                alert(`Failed to ${action} Docker project: ${result.error}`);
+
+                // Show error notification
+                this.showNotification(`Failed to ${action} Docker project: ${result.error}`, 'error', 8000);
+            }
+
+        } catch (error) {
+            this.addLog(`❌ Error executing Docker ${action}: ${error.message}`, 'error');
+            alert(`Failed to execute Docker ${action}: ${error.message}`);
+
+            // Show error notification
+            this.showNotification(`Error executing Docker ${action}: ${error.message}`, 'error', 8000);
+        } finally {
+            this.endExecution(true);
+            this.hideLoading();
+        }
+    }
+
+    async detectDockerMainFile() {
+        const dirName = this.currentDirectories['docker'];
+        if (!dirName) {
+            alert('No Docker directory selected');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/directories/docker/${dirName}`);
+            if (!response.ok) {
+                throw new Error('Failed to load directory files');
+            }
+
+            const data = await response.json();
+            const files = data.files;
+
+            // Look for docker-compose files first (higher priority)
+            const composeFiles = files.filter(file =>
+                file.name.match(/^(docker-)?compose\.(yml|yaml)$/i)
+            );
+
+            if (composeFiles.length > 0) {
+                const mainFileSelect = document.getElementById('docker-main-file');
+                if (mainFileSelect) {
+                    for (let option of mainFileSelect.options) {
+                        if (option.value === composeFiles[0].name) {
+                            option.selected = true;
+                            break;
+                        }
+                    }
+                }
+                this.addLog(`🔍 Auto-detected Docker Compose file: ${composeFiles[0].name}`, 'info');
+                return;
+            }
+
+            // Look for Dockerfile
+            const dockerfiles = files.filter(file =>
+                file.name.match(/^dockerfile$/i) || file.name.startsWith('Dockerfile')
+            );
+
+            if (dockerfiles.length > 0) {
+                const mainFileSelect = document.getElementById('docker-main-file');
+                if (mainFileSelect) {
+                    for (let option of mainFileSelect.options) {
+                        if (option.value === dockerfiles[0].name) {
+                            option.selected = true;
+                            break;
+                        }
+                    }
+                }
+                this.addLog(`🔍 Auto-detected Dockerfile: ${dockerfiles[0].name}`, 'info');
+                return;
+            }
+
+            this.addLog(`⚠️ No Docker Compose file or Dockerfile found in project`, 'warning');
+            alert('No Docker Compose file or Dockerfile found in the project directory');
+
+        } catch (error) {
+            this.addLog(`❌ Error detecting Docker main file: ${error.message}`, 'error');
+            alert(`Failed to detect Docker main file: ${error.message}`);
+        }
+    }
+
+    // === OVERVIEW METHODS ===
+
+    async refreshPythonOverview(forceRefresh = false) {
+        const machineId = document.getElementById('python-machine-select').value;
+        if (!machineId) {
+            this.resetPythonOverview();
+            return;
+        }
+
+        try {
+            this.showLoading();
+
+            const response = await fetch('/api/python/overview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    force_refresh: forceRefresh
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.displayPythonOverview(result.overview);
+            } else {
+                this.resetPythonOverview(`Error: ${result.error}`);
+            }
+        } catch (error) {
+            this.resetPythonOverview(`Error: ${error.message}`);
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    displayPythonOverview(overview) {
+        const container = document.getElementById('python-overview-content');
+        if (!container) return;
+
+        container.innerHTML = `
+            <div class="enterprise-overview-panel">
+                <div class="overview-header">
+                    <div class="status-primary">
+                        <div class="tech-brand">
+                            <i class="fab fa-python"></i>
+                            <span class="brand-text">Python Environment</span>
+                        </div>
+                        <div class="version-badge">${this.escapeHtml(overview.python_version || 'Not installed')}</div>
+                    </div>
+                    <div class="health-indicator ${overview.python_version !== 'Not installed' ? 'healthy' : 'unhealthy'}">
+                        <div class="health-dot"></div>
+                        <span class="health-text">${overview.python_version !== 'Not installed' ? 'Available' : 'Not Available'}</span>
+                    </div>
+                </div>
+
+                <div class="metrics-dashboard">
+                    <div class="metric-card primary">
+                        <div class="metric-icon">
+                            <i class="fas fa-cube"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${overview.installed_packages || 0}</div>
+                            <div class="metric-label">Installed Packages</div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card secondary">
+                        <div class="metric-icon">
+                            <i class="fas fa-layer-group"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${overview.virtualenv_support || 'Unknown'}</div>
+                            <div class="metric-label">Virtual Environment</div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card tertiary">
+                        <div class="metric-icon">
+                            <i class="fas fa-download"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${overview.pip_version ? 'Available' : 'Not Available'}</div>
+                            <div class="metric-label">Package Manager</div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card quaternary">
+                        <div class="metric-icon">
+                            <i class="fas fa-microchip"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${overview.architecture || 'Unknown'}</div>
+                            <div class="metric-label">Architecture</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="system-info-grid">
+                    <div class="info-section">
+                        <div class="section-header">
+                            <i class="fab fa-python" style="color: #fff"></i>
+                            <span style="color: #fff">Python Details</span>
+                        </div>
+                        <div class="info-items">
+                            <div class="info-row">
+                                <span class="info-key">Python Version</span>
+                                <span class="info-value">${this.escapeHtml(overview.python_version || 'None')}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Python Path</span>
+                                <span class="info-value">${this.escapeHtml(overview.python_path || 'None')}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Pip Version</span>
+                                <span class="info-value">${this.escapeHtml(overview.pip_version || 'None')}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="info-section">
+                        <div class="section-header">
+                            <i class="fas fa-cogs" style="color: #fff"></i>
+                            <span style="color: #fff">Environment Support</span>
+                        </div>
+                        <div class="info-items">
+                            <div class="info-row">
+                                <span class="info-key">Virtual Environment</span>
+                                <span class="info-value">${this.escapeHtml(overview.virtualenv_support || 'None')}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">System Architecture</span>
+                                <span class="info-value">${this.escapeHtml(overview.architecture || 'None')}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Package Count</span>
+                                <span class="info-value">${overview.installed_packages || 'None'}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    resetPythonOverview(message = 'Select a machine to view Python environment information') {
+        const container = document.getElementById('python-overview-content');
+        if (!container) return;
+
+        container.innerHTML = `
+            <div class="info-placeholder">
+                <i class="fab fa-python"></i>
+                <p>${message}</p>
+            </div>
+        `;
+    }
+
+    async refreshAnsibleOverview(forceRefresh = false) {
+        const machineId = document.getElementById('ansible-machine-select').value;
+        if (!machineId) {
+            this.resetAnsibleOverview();
+            return;
+        }
+
+        try {
+            this.showLoading();
+
+            const response = await fetch('/api/ansible/overview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    force_refresh: forceRefresh
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.displayAnsibleOverview(result.overview);
+            } else {
+                this.resetAnsibleOverview(`Error: ${result.error}`);
+            }
+        } catch (error) {
+            this.resetAnsibleOverview(`Error: ${error.message}`);
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    displayAnsibleOverview(overview) {
+        const container = document.getElementById('ansible-overview-content');
+        if (!container) return;
+
+        const isInstalled = overview.ansible_version !== 'Not installed';
+
+        container.innerHTML = `
+            <div class="enterprise-overview-panel">
+                <div class="overview-header">
+                    <div class="status-primary">
+                        <div class="tech-brand">
+                            <i class="fas fa-cogs"></i>
+                            <span class="brand-text">Ansible Environment</span>
+                        </div>
+                        <div class="version-badge">${this.escapeHtml(overview.ansible_version || 'Not installed')}</div>
+                    </div>
+                    <div class="health-indicator ${isInstalled ? 'healthy' : 'unhealthy'}">
+                        <div class="health-dot"></div>
+                        <span class="health-text">${isInstalled ? 'Available' : 'Not Available'}</span>
+                    </div>
+                </div>
+
+                <div class="metrics-dashboard">
+                    <div class="metric-card primary">
+                        <div class="metric-icon">
+                            <i class="fas fa-play-circle"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${overview.playbook_available || 'None'}</div>
+                            <div class="metric-label">Playbook Support</div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card secondary">
+                        <div class="metric-icon">
+                            <i class="fas fa-star"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${overview.galaxy_available || 'None'}</div>
+                            <div class="metric-label">Galaxy Support</div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card tertiary">
+                        <div class="metric-icon">
+                            <i class="fas fa-shield-alt"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${overview.vault_available || 'None'}</div>
+                            <div class="metric-label">Vault Support</div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card quaternary">
+                        <div class="metric-icon">
+                            <i class="fas fa-cube"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${overview.installed_collections || 0}</div>
+                            <div class="metric-label">Collections</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="system-info-grid">
+                    <div class="info-section">
+                        <div class="section-header">
+                            <i class="fas fa-cogs" style="color: #fff"></i>
+                            <span style="color: #fff">Ansible Details</span>
+                        </div>
+                        <div class="info-items">
+                            <div class="info-row">
+                                <span class="info-key">Ansible Version</span>
+                                <span class="info-value">${this.escapeHtml(overview.ansible_version || 'None')}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Core Version</span>
+                                <span class="info-value">${this.escapeHtml(overview.ansible_core_version || 'None')}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Config File</span>
+                                <span class="info-value">${this.escapeHtml(overview.config_file || 'None')}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Python Version</span>
+                                <span class="info-value">${this.escapeHtml(overview.python_version || 'None')}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="info-section">
+                        <div class="section-header">
+                            <i class="fas fa-tools" style="color: #fff"></i>
+                            <span style="color: #fff">Available Tools</span>
+                        </div>
+                        <div class="info-items">
+                            <div class="info-row">
+                                <span class="info-key">Executable Location</span>
+                                <span class="info-value">${this.escapeHtml(overview.executable_location || 'None')}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Playbook Available</span>
+                                <span class="info-value">${this.escapeHtml(overview.playbook_available || 'None')}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Galaxy Available</span>
+                                <span class="info-value">${this.escapeHtml(overview.galaxy_available || 'None')}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Vault Available</span>
+                                <span class="info-value">${this.escapeHtml(overview.vault_available || 'None')}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    resetAnsibleOverview(message = 'Select a machine to view Ansible environment information') {
+        const container = document.getElementById('ansible-overview-content');
+        if (!container) return;
+
+        container.innerHTML = `
+            <div class="info-placeholder">
+                <i class="fas fa-cogs"></i>
+                <p>${message}</p>
+            </div>
+        `;
+    }
+
+    async refreshTerraformOverview(forceRefresh = false) {
+        const machineId = document.getElementById('terraform-machine-select').value;
+        if (!machineId) {
+            this.resetTerraformOverview();
+            return;
+        }
+
+        try {
+            this.showLoading();
+
+            const response = await fetch('/api/terraform/overview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    force_refresh: forceRefresh
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.displayTerraformOverview(result.overview);
+            } else {
+                this.resetTerraformOverview(`Error: ${result.error}`);
+            }
+        } catch (error) {
+            this.resetTerraformOverview(`Error: ${error.message}`);
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    displayTerraformOverview(overview) {
+        const container = document.getElementById('terraform-overview-content');
+        if (!container) return;
+
+        const isInstalled = overview.terraform_version !== 'Not installed';
+        const additionalTools = overview.additional_tools || {};
+        const availableToolsCount = Object.values(additionalTools).filter(status => status === 'Available').length;
+
+        container.innerHTML = `
+            <div class="enterprise-overview-panel">
+                <div class="overview-header">
+                    <div class="status-primary">
+                        <div class="tech-brand">
+                            <i class="fas fa-cloud"></i>
+                            <span class="brand-text">Terraform Environment</span>
+                        </div>
+                        <div class="version-badge">${this.escapeHtml(overview.terraform_version || 'Not installed')}</div>
+                    </div>
+                    <div class="health-indicator ${isInstalled ? 'healthy' : 'unhealthy'}">
+                        <div class="health-dot"></div>
+                        <span class="health-text">${isInstalled ? 'Available' : 'Not Available'}</span>
+                    </div>
+                </div>
+
+                <div class="metrics-dashboard">
+                    <div class="metric-card primary">
+                        <div class="metric-icon">
+                            <i class="fas fa-layer-group"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${Object.keys(overview.provider_versions || {}).length}</div>
+                            <div class="metric-label">Providers</div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card secondary">
+                        <div class="metric-icon">
+                            <i class="fas fa-workspace"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${this.escapeHtml(overview.current_workspace || 'default')}</div>
+                            <div class="metric-label">Current Workspace</div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card tertiary">
+                        <div class="metric-icon">
+                            <i class="fas fa-cloud"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${overview.cloud_cli_available || 'None'}</div>
+                            <div class="metric-label">Cloud CLI</div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card quaternary">
+                        <div class="metric-icon">
+                            <i class="fas fa-tools"></i>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value">${availableToolsCount}</div>
+                            <div class="metric-label">Additional Tools</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="system-info-grid">
+                    <div class="info-section">
+                        <div class="section-header">
+                            <i class="fas fa-cloud" style="color: #fff"></i>
+                            <span style="color: #fff">Terraform Details</span>
+                        </div>
+                        <div class="info-items">
+                            <div class="info-row">
+                                <span class="info-key">Terraform Version</span>
+                                <span class="info-value">${this.escapeHtml(overview.terraform_version || 'None')}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Platform</span>
+                                <span class="info-value">${this.escapeHtml(overview.platform || 'None')}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Architecture</span>
+                                <span class="info-value">${this.escapeHtml(overview.architecture || 'None')}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Current Workspace</span>
+                                <span class="info-value">${this.escapeHtml(overview.current_workspace || 'None')}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="info-section">
+                        <div class="section-header">
+                            <i class="fas fa-tools" style="color: #fff"></i>
+                            <span style="color: #fff">Additional Tools</span>
+                        </div>
+                        <div class="info-items">
+                            ${Object.entries(additionalTools).map(([tool, status]) => `
+                                <div class="info-row">
+                                    <span class="info-key">${this.escapeHtml(tool)}</span>
+                                    <span class="info-value ${status === 'Available' ? 'status-available' : 'status-unavailable'}">${this.escapeHtml(status)}</span>
+                                </div>
+                            `).join('')}
+                            ${Object.keys(additionalTools).length === 0 ? `
+                                <div class="info-row">
+                                    <span class="info-key">No additional tools detected</span>
+                                    <span class="info-value">None</span>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+                
+                ${Object.keys(overview.provider_versions || {}).length > 0 ? `
+                <div class="system-info-grid">
+                    <div class="info-section full-width">
+                        <div class="section-header">
+                            <i class="fas fa-plug" style="color: #fff"></i>
+                            <span style="color: #fff">Installed Providers</span>
+                        </div>
+                        <div class="info-items">
+                            ${Object.entries(overview.provider_versions || {}).map(([provider, status]) => `
+                                <div class="info-row">
+                                    <span class="info-key">${this.escapeHtml(provider)}</span>
+                                    <span class="info-value">${this.escapeHtml(status)}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    resetTerraformOverview(message = 'Select a machine to view Terraform environment information') {
+        const container = document.getElementById('terraform-overview-content');
+        if (!container) return;
+
+        container.innerHTML = `
+            <div class="info-placeholder">
+                <i class="fas fa-cloud"></i>
+                <p>${message}</p>
+            </div>
+        `;
+    }
+
+    async refreshMachineOSInfo(machineId) {
+        try {
+            const response = await fetch('/api/machine/os-info', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ machine_id: machineId })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                return result.os_info;
+            } else {
+                console.error('Failed to get OS info:', result.error);
+                return null;
+            }
+        } catch (error) {
+            console.error('Error getting machine OS info:', error);
+            return null;
+        }
+    }
+
 }
 
 // Initialize the application

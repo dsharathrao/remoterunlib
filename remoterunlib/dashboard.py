@@ -7,6 +7,10 @@ import datetime
 import time
 import tempfile
 import shutil
+import threading
+import queue
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class Dashboard:
     """A simple Flask-based dashboard to manage remote machines and execute commands."""
@@ -22,6 +26,23 @@ class Dashboard:
         
         # Set up base paths for directories
         self.directories_base_path = os.path.join(scripts_path, "projects")
+
+        # Background execution management
+        self.execution_threads = {}  # {execution_id: {"thread": thread, "future": future, "status": status}}
+        self.executor = ThreadPoolExecutor(max_workers=10)  # Allow 10 concurrent executions
+        self.execution_queue = queue.Queue()
+        self.socketio = None  # Will be set when Flask-SocketIO is initialized
+        
+        # Overview data caching
+        self.overview_cache = {
+            'python': {},    # {machine_id: overview_data}
+            'ansible': {},   # {machine_id: overview_data}
+            'terraform': {}, # {machine_id: overview_data}
+            'os_info': {}    # {machine_id: os_info_data}
+        }
+        
+        # Thread safety lock for database operations
+        self.db_lock = threading.Lock()
 
         # Connect to SQLite and ensure table exists
         self._init_db()
@@ -74,23 +95,138 @@ class Dashboard:
         """)
         self.conn.commit()
     def _insert_execution(self, data):
-        c = self.conn.cursor()
-        c.execute("""
-            INSERT INTO execution_history (id, machine_id, type, status, command, output, started_at, completed_at, duration, logs)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            data['id'],
-            data['machine_id'],
-            data['type'],
-            data['status'],
-            data.get('command'),
-            data.get('output'),
-            data.get('started_at'),
-            data.get('completed_at'),
-            data.get('duration'),
-            data.get('logs'),
-        ))
-        self.conn.commit()
+        with self.db_lock:
+            c = self.conn.cursor()
+            c.execute("""
+                INSERT INTO execution_history (id, machine_id, type, status, command, output, started_at, completed_at, duration, logs)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                data['id'],
+                data['machine_id'],
+                data['type'],
+                data['status'],
+                data.get('command'),
+                data.get('output'),
+                data.get('started_at'),
+                data.get('completed_at'),
+                data.get('duration'),
+                data.get('logs'),
+            ))
+            self.conn.commit()
+
+    def _update_execution_status(self, execution_id, status, output="", errors="", completed_at=None, duration=0):
+        """Update execution status in database and notify via WebSocket."""
+        with self.db_lock:
+            c = self.conn.cursor()
+            if completed_at:
+                c.execute("""
+                    UPDATE execution_history 
+                    SET status = ?, output = ?, logs = ?, completed_at = ?, duration = ?
+                    WHERE id = ?
+                """, (status, output, errors, completed_at, duration, execution_id))
+            else:
+                c.execute("""
+                    UPDATE execution_history 
+                    SET status = ?
+                    WHERE id = ?
+                """, (status, execution_id))
+            self.conn.commit()
+        
+        # Notify via WebSocket if available
+        if self.socketio:
+            self.socketio.emit('execution_status_update', {
+                'execution_id': execution_id,
+                'status': status,
+                'output': output,
+                'errors': errors,
+                'completed_at': completed_at,
+                'duration': duration
+            }, namespace='/ws')
+
+    def _execute_async(self, execution_data, execution_function, *args, **kwargs):
+        """Execute a function asynchronously and track its progress."""
+        execution_id = execution_data['id']
+        
+        try:
+            # Update status to running
+            self._update_execution_status(execution_id, 'running')
+            
+            # Execute the function
+            start_time = time.time()
+            result = execution_function(*args, **kwargs)
+            end_time = time.time()
+            
+            # Determine success/failure
+            if isinstance(result, dict):
+                success = result.get('success', False)
+                output = result.get('output', '')
+                errors = result.get('errors', '') or result.get('error', '')
+            elif isinstance(result, tuple) and len(result) == 2:
+                output, errors = result
+                success = not errors
+            else:
+                output = str(result) if result else ''
+                errors = ''
+                success = True
+            
+            status = 'success' if success else 'failed'
+            completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            duration = end_time - start_time
+            
+            # Update final status
+            self._update_execution_status(execution_id, status, output, errors, completed_at, duration)
+            
+            # Clean up thread tracking
+            if execution_id in self.execution_threads:
+                del self.execution_threads[execution_id]
+            
+            return {'success': success, 'output': output, 'errors': errors}
+            
+        except Exception as e:
+            # Handle execution error
+            completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            duration = time.time() - start_time if 'start_time' in locals() else 0
+            
+            self._update_execution_status(execution_id, 'failed', '', str(e), completed_at, duration)
+            
+            # Clean up thread tracking
+            if execution_id in self.execution_threads:
+                del self.execution_threads[execution_id]
+            
+            return {'success': False, 'output': '', 'errors': str(e)}
+
+    def cancel_execution(self, execution_id):
+        """Cancel a running execution."""
+        if execution_id in self.execution_threads:
+            thread_info = self.execution_threads[execution_id]
+            if 'future' in thread_info:
+                future = thread_info['future']
+                # Try to cancel the future first
+                if future.cancel():
+                    # Successfully cancelled before it started
+                    self._update_execution_status(execution_id, 'cancelled')
+                    del self.execution_threads[execution_id]
+                    return True
+                else:
+                    # Already running, forcefully cancel
+                    try:
+                        # Mark as cancelling
+                        self._update_execution_status(execution_id, 'cancelled')
+                        
+                        # Get the thread
+                        if 'thread' in thread_info:
+                            # Store the cancellation flag
+                            thread_info['cancelled'] = True
+                        
+                        # Remove from tracking
+                        if execution_id in self.execution_threads:
+                            del self.execution_threads[execution_id]
+                        
+                        return True
+                    except Exception as e:
+                        print(f"Error cancelling execution {execution_id}: {e}")
+                        return False
+        return False
 
     def _get_execution_history(self, filters=None):
         c = self.conn.cursor()
@@ -125,11 +261,14 @@ class Dashboard:
         # Active machines: count all machines
         c.execute("SELECT COUNT(*) FROM machines")
         active_machines = c.fetchone()[0]
+        # Running executions: count currently executing threads
+        running_executions = len(self.execution_threads)
         return {
             'successful_executions': success_24h,
             'failed_executions': failed_24h,
             'recent_executions': total_24h,
-            'active_machines': active_machines
+            'active_machines': active_machines,
+            'running_executions': running_executions
         }
 
     def _set_machine_state(self, machine_id, status):
@@ -203,13 +342,14 @@ class Dashboard:
         import os
         from flask import Flask, request, jsonify, send_from_directory
         from flask_cors import CORS
-        from flask_socketio import SocketIO, emit
+        from flask_socketio import SocketIO, emit, join_room, leave_room
 
         app = Flask(__name__, static_folder=None)
         CORS(app)
 
         # Add Flask-SocketIO for WebSocket support
         socketio = SocketIO(app, cors_allowed_origins="*")
+        self.socketio = socketio  # Store reference for use in other methods
 
         # Serve index.html and static files
         UI_DIR = os.path.join(os.path.dirname(__file__), "UI")
@@ -233,19 +373,29 @@ class Dashboard:
             return send_from_directory(UI_DIR, "script.js")
 
 
-        # WebSocket endpoint for live logs
+        # WebSocket endpoints for real-time updates
         @socketio.on('connect', namespace='/ws')
         def ws_connect():
-            emit('log', {'timestamp': '2024-01-20 10:30:00', 'level': 'info', 'message': 'System ready'})
-
-        @socketio.on('get_logs', namespace='/ws')
-        def ws_get_logs():
-            # Example: emit static logs
-            emit('log', {'timestamp': '2024-01-20 10:30:00', 'level': 'info', 'message': 'System ready'})
+            print(f"Client connected: {request.sid}")
+            emit('connected', {'message': 'Connected to RemoteRunLib Dashboard'})
 
         @socketio.on('disconnect', namespace='/ws')
         def ws_disconnect():
-            pass
+            print(f"Client disconnected: {request.sid}")
+
+        @socketio.on('join_execution', namespace='/ws')
+        def join_execution_room(data):
+            execution_id = data.get('execution_id')
+            if execution_id:
+                join_room(f"execution_{execution_id}")
+                emit('joined_execution', {'execution_id': execution_id})
+
+        @socketio.on('leave_execution', namespace='/ws')
+        def leave_execution_room(data):
+            execution_id = data.get('execution_id')
+            if execution_id:
+                leave_room(f"execution_{execution_id}")
+                emit('left_execution', {'execution_id': execution_id})
 
         # Machine management (in-memory for demo)
 
@@ -339,6 +489,7 @@ class Dashboard:
             machine_id = data.get("machine_id")
             command = data.get("command")
             timeout = int(data.get("timeout", 30))
+            
             # Find machine by id (not index)
             machine = None
             for m in self.machines:
@@ -347,8 +498,27 @@ class Dashboard:
                     break
             if not machine:
                 return jsonify({"success": False, "message": "Machine not found"}), 404
+            
+            # Create execution record
+            execution_id = str(uuid.uuid4())
             started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-            try:
+            
+            exec_data = {
+                "id": execution_id,
+                "machine_id": machine_id,
+                "type": "command",
+                "status": "queued",
+                "command": command,
+                "output": "",
+                "started_at": started_at,
+                "completed_at": None,
+                "duration": 0,
+                "logs": "",
+            }
+            self._insert_execution(exec_data)
+            
+            # Define the execution function
+            def execute_command_task():
                 client = SSHClient(
                     machine["host"],
                     machine["username"],
@@ -357,48 +527,35 @@ class Dashboard:
                     machine.get("key"),
                 )
                 client.login()
-                import time
-                t0 = time.time()
                 output, errors = client.run_command(command, timeout=timeout)
-                t1 = time.time()
                 client.close()
-                status = "success" if not errors else "failed"
-                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                duration = t1 - t0
-                # Insert execution history
-                exec_data = {
-                    "id": str(uuid.uuid4()),
-                    "machine_id": machine_id,
-                    "type": "command",
-                    "status": status,
-                    "command": command,
-                    "output": output,
-                    "started_at": started_at,
-                    "completed_at": completed_at,
-                    "duration": duration,
-                    "logs": errors or "",
-                }
-                self._insert_execution(exec_data)
-                return jsonify({"success": True, "output": output, "errors": errors})
-            except Exception as e:
-                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                import time
-                duration = 0
-                # Insert failed execution history
-                exec_data = {
-                    "id": str(uuid.uuid4()),
-                    "machine_id": machine_id,
-                    "type": "command",
-                    "status": "failed",
-                    "command": command,
-                    "output": "",
-                    "started_at": started_at,
-                    "completed_at": completed_at,
-                    "duration": duration,
-                    "logs": str(e),
-                }
-                self._insert_execution(exec_data)
-                return jsonify({"success": False, "message": str(e)}), 500
+                return {'success': not errors, 'output': output, 'errors': errors}
+            
+            # Submit to thread pool
+            future = self.executor.submit(self._execute_async, exec_data, execute_command_task)
+            self.execution_threads[execution_id] = {"future": future, "status": "queued"}
+            
+            # Emit notification
+            socketio.emit('notification', {
+                'type': 'info',
+                'message': f'Command execution started. Check Dashboard for output/logs.',
+                'duration': 10000
+            }, namespace='/ws')
+            
+            # Emit execution started event
+            socketio.emit('execution_started', {
+                'execution_id': execution_id,
+                'type': 'command',
+                'command': command,
+                'machine_id': machine_id
+            }, namespace='/ws')
+            
+            return jsonify({
+                "success": True, 
+                "execution_id": execution_id,
+                "message": "Command execution started in background",
+                "status": "queued"
+            })
 
         @app.route("/api/execution-history", methods=["GET", "DELETE"])
         def execution_history():
@@ -421,6 +578,61 @@ class Dashboard:
         def get_execution_stats():
             stats = self._get_execution_stats()
             return jsonify(stats)
+        
+        # New endpoints for async execution management
+        @app.route("/api/executions/running", methods=["GET"])
+        def get_running_executions():
+            """Get list of currently running executions."""
+            running = []
+            for exec_id, thread_info in self.execution_threads.items():
+                # Get execution details from database
+                with self.db_lock:
+                    c = self.conn.cursor()
+                    c.execute("SELECT * FROM execution_history WHERE id = ?", (exec_id,))
+                    row = c.fetchone()
+                    if row:
+                        exec_data = dict(row)
+                        exec_data['can_cancel'] = not thread_info.get('future', {}).running() if 'future' in thread_info else False
+                        running.append(exec_data)
+            return jsonify(running)
+
+        @app.route("/api/executions/<execution_id>/cancel", methods=["POST"])
+        def cancel_execution_endpoint(execution_id):
+            """Cancel a running execution."""
+            if execution_id not in self.execution_threads:
+                return jsonify({"success": False, "message": "Execution not found or already completed"}), 404
+            
+            success = self.cancel_execution(execution_id)
+            if success:
+                # Emit notification
+                socketio.emit('notification', {
+                    'type': 'warning',
+                    'message': f'Execution {execution_id[:8]} has been cancelled',
+                    'duration': 5000
+                }, namespace='/ws')
+                return jsonify({"success": True, "message": "Execution cancelled"})
+            else:
+                # Execution is running and cannot be cancelled cleanly
+                socketio.emit('notification', {
+                    'type': 'warning',
+                    'message': f'Execution {execution_id[:8]} is running and cannot be cancelled',
+                    'duration': 5000
+                }, namespace='/ws')
+                return jsonify({"success": False, "message": "Execution is already running and cannot be cancelled"}), 200
+
+        @app.route("/api/executions/<execution_id>/status", methods=["GET"])
+        def get_execution_status(execution_id):
+            """Get current status of an execution."""
+            with self.db_lock:
+                c = self.conn.cursor()
+                c.execute("SELECT * FROM execution_history WHERE id = ?", (execution_id,))
+                row = c.fetchone()
+                if row:
+                    exec_data = dict(row)
+                    exec_data['is_running'] = execution_id in self.execution_threads
+                    return jsonify(exec_data)
+                else:
+                    return jsonify({"error": "Execution not found"}), 404
         # Python script execution
         @app.route("/api/python/run", methods=["POST"])
         def run_python():
@@ -527,6 +739,7 @@ class Dashboard:
             script_content = data.get("script_content")
             filename = data.get("filename", "script.py")
             timeout = int(data.get("timeout", 60))
+            
             # Find machine by id
             machine = None
             for m in self.machines:
@@ -535,13 +748,33 @@ class Dashboard:
                     break
             if not machine:
                 return jsonify({"success": False, "message": "Machine not found"}), 404
+            
+            # Create execution record
+            execution_id = str(uuid.uuid4())
             started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-            try:
+            
+            exec_data = {
+                "id": execution_id,
+                "machine_id": machine_id,
+                "type": "python",
+                "status": "queued",
+                "command": filename,
+                "output": "",
+                "started_at": started_at,
+                "completed_at": None,
+                "duration": 0,
+                "logs": "",
+            }
+            self._insert_execution(exec_data)
+            
+            # Define the execution function
+            def execute_python_task():
                 import tempfile
                 with tempfile.NamedTemporaryFile("w", delete=False, suffix=".py") as tmpf:
                     tmpf.write(script_content)
                     tmpf.flush()
                     script_path = tmpf.name
+                
                 client = SSHClient(
                     machine["host"],
                     machine["username"],
@@ -550,48 +783,42 @@ class Dashboard:
                     machine.get("key"),
                 )
                 client.login()
-                t0 = time.time()
                 output, errors = client.run_python_file(script_path, timeout=timeout)
-                t1 = time.time()
                 client.close()
-                status = "success" if not errors else "failed"
-                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                duration = t1 - t0
-                # Insert execution history for dashboard
-                exec_data = {
-                    "id": str(uuid.uuid4()),
-                    "machine_id": machine_id,
-                    "type": "python",
-                    "status": status,
-                    "command": filename,
-                    "output": output,
-                    "started_at": started_at,
-                    "completed_at": completed_at,
-                    "duration": duration,
-                    "logs": errors or "",
-                }
-                self._insert_execution(exec_data)
-                if errors:
-                    return jsonify({"success": False, "output": output, "message": errors}), 500
-                return jsonify({"success": True, "output": output})
-            except Exception as e:
-                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                duration = 0
-                # Insert failed execution history for dashboard
-                exec_data = {
-                    "id": str(uuid.uuid4()),
-                    "machine_id": machine_id,
-                    "type": "python",
-                    "status": "failed",
-                    "command": filename,
-                    "output": "",
-                    "started_at": started_at,
-                    "completed_at": completed_at,
-                    "duration": duration,
-                    "logs": str(e),
-                }
-                self._insert_execution(exec_data)
-                return jsonify({"success": False, "message": str(e)}), 500
+                
+                # Clean up temp file
+                try:
+                    os.unlink(script_path)
+                except:
+                    pass
+                
+                return {'success': not errors, 'output': output, 'errors': errors}
+            
+            # Submit to thread pool
+            future = self.executor.submit(self._execute_async, exec_data, execute_python_task)
+            self.execution_threads[execution_id] = {"future": future, "status": "queued"}
+            
+            # Emit notification
+            socketio.emit('notification', {
+                'type': 'info',
+                'message': f'Python script execution started. Check Dashboard for output/logs.',
+                'duration': 10000
+            }, namespace='/ws')
+            
+            # Emit execution started event
+            socketio.emit('execution_started', {
+                'execution_id': execution_id,
+                'type': 'python',
+                'command': filename,
+                'machine_id': machine_id
+            }, namespace='/ws')
+            
+            return jsonify({
+                "success": True, 
+                "execution_id": execution_id,
+                "message": "Python script execution started in background",
+                "status": "queued"
+            })
 
         # --- Unified Ansible endpoint (matches frontend) ---
         @app.route("/api/run-ansible", methods=["POST"])
@@ -605,7 +832,8 @@ class Dashboard:
             playbook = data.get("playbook")
             script_content = data.get("script_content")
             filename = data.get("filename", "playbook.yml")
-            become = data.get("become", False)  # Get the become parameter
+            become = data.get("become", False)
+            
             # Find machine by id
             machine = None
             for m in self.machines:
@@ -614,8 +842,29 @@ class Dashboard:
                     break
             if not machine:
                 return jsonify({"success": False, "message": "Machine not found"}), 404
+            
+            # Create execution record
+            execution_id = str(uuid.uuid4())
             started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-            try:
+            
+            exec_command = f"{module}: {args}" if mode == "adhoc" else filename
+            
+            exec_data = {
+                "id": execution_id,
+                "machine_id": machine_id,
+                "type": "ansible",
+                "status": "queued",
+                "command": exec_command,
+                "output": "",
+                "started_at": started_at,
+                "completed_at": None,
+                "duration": 0,
+                "logs": "",
+            }
+            self._insert_execution(exec_data)
+            
+            # Define the execution function
+            def execute_ansible_task():
                 client = SSHClient(
                     machine["host"],
                     machine["username"],
@@ -624,16 +873,12 @@ class Dashboard:
                     machine.get("key"),
                 )
                 client.login()
-                t0 = time.time()
+                
                 if mode == "adhoc":
-                    # For ad-hoc commands, pass just the command/args, not the full ansible syntax
-                    # The run_ansible_playbook method will construct the proper ansible command
-                    command = args  # Just pass the arguments directly
-                    module = module or "command"  # Default to command if module is None/empty
+                    command = args
+                    module = module or "command"
                     output = client.run_ansible_playbook(command, module=module, become=become)
-                    exec_command = f"{module}: {args}"
                 else:
-                    # Save playbook content to a temp file if provided
                     if script_content:
                         import tempfile
                         with tempfile.NamedTemporaryFile("w", delete=False, suffix=".yml") as tmpf:
@@ -641,48 +886,42 @@ class Dashboard:
                             tmpf.flush()
                             playbook_path = tmpf.name
                         output = client.run_ansible_playbook(playbook_path, become=become)
-                        exec_command = filename
+                        # Clean up temp file
+                        try:
+                            os.unlink(playbook_path)
+                        except:
+                            pass
                     else:
                         output = client.run_ansible_playbook(playbook, become=become)
-                        exec_command = playbook
-                t1 = time.time()
+                
                 client.close()
-                status = "success"
-                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                duration = t1 - t0
-                # Insert execution history for dashboard
-                exec_data = {
-                    "id": str(uuid.uuid4()),
-                    "machine_id": machine_id,
-                    "type": "ansible",
-                    "status": status,
-                    "command": exec_command,
-                    "output": str(output),
-                    "started_at": started_at,
-                    "completed_at": completed_at,
-                    "duration": duration,
-                    "logs": "",
-                }
-                self._insert_execution(exec_data)
-                return jsonify({"success": True, "output": output})
-            except Exception as e:
-                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                duration = 0
-                # Insert failed execution history for dashboard
-                exec_data = {
-                    "id": str(uuid.uuid4()),
-                    "machine_id": machine_id,
-                    "type": "ansible",
-                    "status": "failed",
-                    "command": module if mode == "adhoc" else filename,
-                    "output": "",
-                    "started_at": started_at,
-                    "completed_at": completed_at,
-                    "duration": duration,
-                    "logs": str(e),
-                }
-                self._insert_execution(exec_data)
-                return jsonify({"success": False, "message": str(e)}), 500
+                return {'success': True, 'output': str(output), 'errors': ''}
+            
+            # Submit to thread pool
+            future = self.executor.submit(self._execute_async, exec_data, execute_ansible_task)
+            self.execution_threads[execution_id] = {"future": future, "status": "queued"}
+            
+            # Emit notification
+            socketio.emit('notification', {
+                'type': 'info',
+                'message': f'Ansible execution started. Check Dashboard for output/logs.',
+                'duration': 10000
+            }, namespace='/ws')
+            
+            # Emit execution started event
+            socketio.emit('execution_started', {
+                'execution_id': execution_id,
+                'type': 'ansible',
+                'command': exec_command,
+                'machine_id': machine_id
+            }, namespace='/ws')
+            
+            return jsonify({
+                "success": True, 
+                "execution_id": execution_id,
+                "message": "Ansible execution started in background",
+                "status": "queued"
+            })
 
         # --- Enhanced Terraform endpoint with proper output handling ---
         @app.route("/api/run-terraform", methods=["POST"])
@@ -695,148 +934,110 @@ class Dashboard:
             filename = data.get("filename", "main.tf")
             directory_name = data.get("directory_name")  # For directory-based execution
             
-            # For terraform, we can accept "local" as machine_id or skip machine validation
-            if machine_id != "local":
-                # Find machine by id (used for execution tracking but Terraform runs locally)
-                machine = None
-                for m in self.machines:
-                    if str(m.get("id")) == str(machine_id):
-                        machine = m
-                        break
-                if not machine:
-                    return jsonify({"success": False, "message": "Machine not found"}), 404
-
-            # Validate action - only support init, plan, and apply (no destroy)
+            # Validate action
             if action not in ["init", "plan", "apply"]:
                 return jsonify({"success": False, "message": "Invalid action. Supported: init, plan, apply"}), 400
-
+            
+            # Create execution record
+            execution_id = str(uuid.uuid4())
             started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-            temp_dir = None
-            captured_output = ""
             
-            try:
-                # Terraform runs locally on the dashboard host, not on remote machines
-                # This is similar to how Ansible works - local execution managing remote resources
-                
-                if directory_name:
-                    # Directory-based execution: use existing project directory
-                    work_dir = os.path.join(self.directories_base_path, 'terraform', directory_name)
-                    if not os.path.exists(work_dir):
-                        return jsonify({"success": False, "message": f"Directory '{directory_name}' not found"}), 404
-                elif script_content.strip():
-                    # Content-based execution: create temporary directory
-                    temp_dir = tempfile.mkdtemp(prefix="terraform_")
-                    tf_file_path = os.path.join(temp_dir, filename)
-                    with open(tf_file_path, 'w') as f:
-                        f.write(script_content)
-                    work_dir = temp_dir
-                else:
-                    # For init action without content, use a default directory
-                    work_dir = tempfile.mkdtemp(prefix="terraform_init_")
-
-                t0 = time.time()
-                result = False
-                
-                # Use local Terraform execution methods (remote=False)
-                if action == "init":
-                    # Run terraform init locally
-                    success, output, error = self._run_terraform_init_local(work_dir)
-                    captured_output = output
-                    if error:
-                        captured_output += f"\nErrors: {error}"
-                    result = success
-                        
-                elif action == "plan":
-                    # For plan, we need content OR a directory
-                    if not script_content.strip() and not directory_name:
-                        return jsonify({"success": False, "message": "Terraform configuration content or directory is required for plan action"}), 400
-                    
-                    # Run terraform plan locally  
-                    success, output, error = self._run_terraform_plan_local(work_dir)
-                    captured_output = output
-                    if error:
-                        captured_output += f"\nErrors: {error}"
-                    result = success
-                    
-                elif action == "apply":
-                    # For apply, we need content OR a directory
-                    if not script_content.strip() and not directory_name:
-                        return jsonify({"success": False, "message": "Terraform configuration content or directory is required for apply action"}), 400
-                    
-                    # Run terraform apply locally
-                    success, output, error = self._run_terraform_apply_local(work_dir)
-                    captured_output = output
-                    if error:
-                        captured_output += f"\nErrors: {error}"
-                    result = success
-                
-                t1 = time.time()
-                
-                # Determine status based on result
-                status = "success" if result else "failed"
-                
-                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                duration = t1 - t0
-                
-                # Prepare command description
-                command_desc = f"terraform {action} (local execution)"
-                if directory_name:
-                    command_desc += f" - directory: {directory_name}"
-                elif script_content.strip() and filename:
-                    command_desc += f" - {filename}"
-                
-                # Insert execution history
-                # For terraform, always use "local" as machine_id since it runs locally
-                actual_machine_id = "local" if machine_id == "local" or not machine_id else machine_id
-                exec_data = {
-                    "id": str(uuid.uuid4()),
-                    "machine_id": actual_machine_id,
-                    "type": "terraform",
-                    "status": status,
-                    "command": command_desc,
-                    "output": captured_output,
-                    "started_at": started_at,
-                    "completed_at": completed_at,
-                    "duration": duration,
-                    "logs": "",
-                }
-                self._insert_execution(exec_data)
-                
-                return jsonify({
-                    "success": status == "success",
-                    "output": captured_output,
-                    "message": f"Terraform {action} completed locally" if status == "success" else f"Terraform {action} failed"
-                })
-                
-            except Exception as e:
-                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                duration = 0
-                
-                # Insert failed execution history
-                exec_data = {
-                    "id": str(uuid.uuid4()),
-                    "machine_id": machine_id,
-                    "type": "terraform",
-                    "status": "failed",
-                    "command": f"terraform {action} (local execution)",
-                    "output": captured_output,
-                    "started_at": started_at,
-                    "completed_at": completed_at,
-                    "duration": duration,
-                    "logs": str(e),
-                }
-                self._insert_execution(exec_data)
-                
-                return jsonify({"success": False, "message": f"Terraform {action} failed: {str(e)}"}), 500
+            # Prepare command description
+            command_desc = f"terraform {action} (local execution)"
+            if directory_name:
+                command_desc += f" - directory: {directory_name}"
+            elif script_content.strip() and filename:
+                command_desc += f" - {filename}"
             
-            finally:
-                # Clean up temporary directory
-                if temp_dir and os.path.exists(temp_dir):
-                    import shutil
-                    try:
-                        shutil.rmtree(temp_dir)
-                    except Exception as cleanup_error:
-                        print(f"Warning: Failed to clean up temp directory {temp_dir}: {cleanup_error}")
+            exec_data = {
+                "id": execution_id,
+                "machine_id": machine_id or "local",
+                "type": "terraform",
+                "status": "queued",
+                "command": command_desc,
+                "output": "",
+                "started_at": started_at,
+                "completed_at": None,
+                "duration": 0,
+                "logs": "",
+            }
+            self._insert_execution(exec_data)
+            
+            # Define the execution function
+            def execute_terraform_task():
+                temp_dir = None
+                captured_output = ""
+                
+                try:
+                    if directory_name:
+                        # Directory-based execution
+                        work_dir = os.path.join(self.directories_base_path, 'terraform', directory_name)
+                        if not os.path.exists(work_dir):
+                            return {"success": False, "output": "", "errors": f"Directory '{directory_name}' not found"}
+                    elif script_content.strip():
+                        # Content-based execution
+                        temp_dir = tempfile.mkdtemp(prefix="terraform_")
+                        tf_file_path = os.path.join(temp_dir, filename)
+                        with open(tf_file_path, 'w') as f:
+                            f.write(script_content)
+                        work_dir = temp_dir
+                    else:
+                        # For init action without content
+                        temp_dir = tempfile.mkdtemp(prefix="terraform_init_")
+                        work_dir = temp_dir
+                    
+                    # Execute terraform command
+                    if action == "init":
+                        success, output, error = self._run_terraform_init_local(work_dir)
+                    elif action == "plan":
+                        if not script_content.strip() and not directory_name:
+                            return {"success": False, "output": "", "errors": "Terraform configuration content or directory is required for plan action"}
+                        success, output, error = self._run_terraform_plan_local(work_dir)
+                    elif action == "apply":
+                        if not script_content.strip() and not directory_name:
+                            return {"success": False, "output": "", "errors": "Terraform configuration content or directory is required for apply action"}
+                        success, output, error = self._run_terraform_apply_local(work_dir)
+                    
+                    captured_output = output
+                    if error:
+                        captured_output += f"\nErrors: {error}"
+                    
+                    return {"success": success, "output": captured_output, "errors": error}
+                    
+                finally:
+                    # Clean up temporary directory
+                    if temp_dir and os.path.exists(temp_dir):
+                        import shutil
+                        try:
+                            shutil.rmtree(temp_dir)
+                        except Exception as cleanup_error:
+                            print(f"Warning: Failed to clean up temp directory {temp_dir}: {cleanup_error}")
+            
+            # Submit to thread pool
+            future = self.executor.submit(self._execute_async, exec_data, execute_terraform_task)
+            self.execution_threads[execution_id] = {"future": future, "status": "queued"}
+            
+            # Emit notification
+            socketio.emit('notification', {
+                'type': 'info',
+                'message': f'Terraform {action} execution started. Check Dashboard for output/logs.',
+                'duration': 10000
+            }, namespace='/ws')
+            
+            # Emit execution started event
+            socketio.emit('execution_started', {
+                'execution_id': execution_id,
+                'type': 'terraform',
+                'command': command_desc,
+                'machine_id': machine_id or "local"
+            }, namespace='/ws')
+            
+            return jsonify({
+                "success": True, 
+                "execution_id": execution_id,
+                "message": f"Terraform {action} execution started in background",
+                "status": "queued"
+            })
 
         # --- Save script endpoint (for frontend) ---
 
@@ -1322,53 +1523,42 @@ This directory contains {script_type} files and configurations.
             if not os.path.exists(project_dir):
                 return jsonify({"success": False, "message": f"Project directory not found: {directory_name}"}), 404
             
+            # Create execution record for background execution
+            execution_id = str(uuid.uuid4())
             started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
             
-            try:
-                if remote and machine_id:
-                    # Find machine for remote execution
-                    machine = None
-                    for m in self.machines:
-                        if str(m.get("id")) == str(machine_id):
-                            machine = m
-                            break
-                    if not machine:
-                        return jsonify({"success": False, "message": "Machine not found"}), 404
-                    
-                    # Create SSH client and execute remotely
-                    client = SSHClient(
-                        machine["host"],
-                        machine["username"],
-                        machine.get("password"),
-                        machine.get("port", 22),
-                        machine.get("key"),
-                    )
-                    client.login()
-                    
-                    result = client.run_project_directory(
-                        project_dir=project_dir,
-                        main_file=main_file,
-                        project_type=project_type,
-                        custom_command=custom_command,
-                        remote=True,
-                        extra_args=extra_args
-                    )
-                    
-                    client.close()
-                    
-                elif project_type == "ansible":
-                    # Ansible always runs locally (on dashboard host) targeting remote machines
-                    # Create a dummy client to use the project execution logic
-                    if machine_id:
+            command_desc = f"{project_type} project: {directory_name}/{main_file or 'auto-detect'}"
+            if custom_command:
+                command_desc += f" ({custom_command})"
+            
+            exec_data = {
+                "id": execution_id,
+                "machine_id": machine_id or "local",
+                "type": f"{project_type}_project",
+                "status": "queued",
+                "command": command_desc,
+                "output": "",
+                "started_at": started_at,
+                "completed_at": None,
+                "duration": 0,
+                "logs": "",
+            }
+            self._insert_execution(exec_data)
+            
+            # Define the execution function
+            def execute_project_task():
+                try:
+                    if remote and machine_id:
+                        # Find machine for remote execution
                         machine = None
                         for m in self.machines:
                             if str(m.get("id")) == str(machine_id):
                                 machine = m
                                 break
                         if not machine:
-                            return jsonify({"success": False, "message": "Machine not found for Ansible targeting"}), 404
+                            return {"success": False, "error": "Machine not found"}
                         
-                        # Create client for inventory generation but don't use for execution
+                        # Create SSH client and execute remotely
                         client = SSHClient(
                             machine["host"],
                             machine["username"],
@@ -1376,71 +1566,88 @@ This directory contains {script_type} files and configurations.
                             machine.get("port", 22),
                             machine.get("key"),
                         )
+                        client.login()
                         
-                        # Use ansible-specific execution for local running
-                        result = self._execute_ansible_project_local(
-                            project_dir, main_file, custom_command, extra_args, client
+                        result = client.run_project_directory(
+                            project_dir=project_dir,
+                            main_file=main_file,
+                            project_type=project_type,
+                            custom_command=custom_command,
+                            remote=True,
+                            extra_args=extra_args
                         )
-                    else:
-                        return jsonify({"success": False, "message": "Machine selection required for Ansible execution"}), 400
                         
-                else:
-                    # Local execution (for terraform and other types)
-                    client = SSHClient("localhost", "local")  # Dummy client for local execution
-                    result = client.run_project_directory(
-                        project_dir=project_dir,
-                        main_file=main_file,
-                        project_type=project_type,
-                        custom_command=custom_command,
-                        remote=False,
-                        extra_args=extra_args
-                    )
-                
-                # Log execution
-                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                exec_data = {
-                    "id": str(uuid.uuid4()),
-                    "machine_id": machine_id or "local",
-                    "type": f"{project_type}_project",
-                    "status": "success" if result.get("success") else "failed",
-                    "command": f"{directory_name}/{result.get('main_file', main_file or 'auto-detected')}",
-                    "output": result.get("output", ""),
-                    "started_at": started_at,
-                    "completed_at": completed_at,
-                    "duration": result.get("execution_time", 0),
-                    "logs": f"Project execution - Location: {result.get('execution_location', 'unknown')}",
-                }
-                self._insert_execution(exec_data)
-                
-                return jsonify({
-                    "success": result.get("success", False),
-                    "message": "Project executed successfully" if result.get("success") else "Project execution failed",
-                    "output": result.get("output", ""),
-                    "error": result.get("error", ""),
-                    "main_file": result.get("main_file"),
-                    "execution_location": result.get("execution_location"),
-                    "execution_time": result.get("execution_time"),
-                    "command": result.get("command"),
-                    "directory": directory_name
-                })
-                
-            except Exception as e:
-                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                exec_data = {
-                    "id": str(uuid.uuid4()),
-                    "machine_id": machine_id or "local",
-                    "type": f"{project_type}_project",
-                    "status": "failed",
-                    "command": f"{directory_name}/{main_file or 'unknown'}",
-                    "output": "",
-                    "started_at": started_at,
-                    "completed_at": completed_at,
-                    "duration": 0,
-                    "logs": f"Project execution failed: {str(e)}",
-                }
-                self._insert_execution(exec_data)
-                
-                return jsonify({"success": False, "message": f"Project execution failed: {str(e)}"}), 500
+                        client.close()
+                        
+                    elif project_type == "ansible":
+                        # Ansible always runs locally (on dashboard host) targeting remote machines
+                        if machine_id:
+                            machine = None
+                            for m in self.machines:
+                                if str(m.get("id")) == str(machine_id):
+                                    machine = m
+                                    break
+                            if not machine:
+                                return {"success": False, "error": "Machine not found for Ansible targeting"}
+                            
+                            # Create client for inventory generation but don't use for execution
+                            client = SSHClient(
+                                machine["host"],
+                                machine["username"],
+                                machine.get("password"),
+                                machine.get("port", 22),
+                                machine.get("key"),
+                            )
+                            
+                            # Use ansible-specific execution for local running
+                            result = self._execute_ansible_project_local(
+                                project_dir, main_file, custom_command, extra_args, client
+                            )
+                        else:
+                            return {"success": False, "error": "Machine selection required for Ansible execution"}
+                            
+                    else:
+                        # Local execution (for terraform and other types)
+                        client = SSHClient("localhost", "local")  # Dummy client for local execution
+                        result = client.run_project_directory(
+                            project_dir=project_dir,
+                            main_file=main_file,
+                            project_type=project_type,
+                            custom_command=custom_command,
+                            remote=False,
+                            extra_args=extra_args
+                        )
+                    
+                    return result
+                    
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+            
+            # Submit to thread pool
+            future = self.executor.submit(self._execute_async, exec_data, execute_project_task)
+            self.execution_threads[execution_id] = {"future": future, "status": "queued"}
+            
+            # Emit notification
+            socketio.emit('notification', {
+                'type': 'info',
+                'message': f'{project_type.title()} project execution started. Check Dashboard for output/logs.',
+                'duration': 10000
+            }, namespace='/ws')
+            
+            # Emit execution started event
+            socketio.emit('execution_started', {
+                'execution_id': execution_id,
+                'type': f'{project_type}_project',
+                'command': command_desc,
+                'machine_id': machine_id or "local"
+            }, namespace='/ws')
+            
+            return jsonify({
+                "success": True, 
+                "execution_id": execution_id,
+                "message": f"{project_type.title()} project execution started in background",
+                "status": "queued"
+            })
 
         @app.route("/api/detect-main-file", methods=["POST"])
         def detect_main_file():
@@ -1512,200 +1719,206 @@ This directory contains {script_type} files and configurations.
                 if not os.path.exists(file_path):
                     return jsonify({"error": "File not found"}), 404
                 
+                # Create execution record for background execution
+                execution_id = str(uuid.uuid4())
                 started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
                 
-                try:
-                    # For Ansible, use RemoteRunLib's built-in Ansible method
-                    if script_type == "ansible":
-                        client = SSHClient(
-                            machine["host"],
-                            machine["username"],
-                            machine.get("password"),
-                            machine.get("port", 22),
-                            machine.get("key"),
-                        )
-                        # Note: No need to login for Ansible - it handles its own connection
-                        
+                command_desc = f"{script_type} directory: {dir_name}/{filename}"
+                if custom_command:
+                    command_desc += f" ({custom_command})"
+                
+                exec_data = {
+                    "id": execution_id,
+                    "machine_id": machine_id,
+                    "type": f"{script_type}_directory",
+                    "status": "queued",
+                    "command": command_desc,
+                    "output": "",
+                    "started_at": started_at,
+                    "completed_at": None,
+                    "duration": 0,
+                    "logs": "",
+                }
+                self._insert_execution(exec_data)
+                
+                # Define the execution function
+                def execute_directory_task():
+                    try:
                         import time
                         t0 = time.time()
                         
-                        if custom_command:
-                            # For custom commands, just run them locally
-                            import subprocess
-                            try:
-                                cd_command = f"cd {dir_path}"
-                                exec_command = f"{cd_command} && {custom_command}"
-                                result = subprocess.run(
-                                    exec_command,
-                                    shell=True,
-                                    capture_output=True,
-                                    text=True,
-                                    timeout=300
-                                )
-                                output = result.stdout
-                                errors = result.stderr if result.returncode != 0 else ""
-                            except Exception as e:
-                                output = ""
-                                errors = str(e)
-                        else:
-                            if filename.endswith(('.yml', '.yaml')):
-                                # Use RemoteRunLib's Ansible method - it runs locally and targets the remote machine
-                                playbook_path = os.path.join(dir_path, filename)
-                                result = client.run_ansible_playbook(playbook_path)
-                                
-                                if isinstance(result, dict):
-                                    output = result.get("output", "")
-                                    errors = result.get("error", "") if not result.get("success", True) else ""
-                                else:
-                                    output = str(result)
-                                    errors = ""
-                            else:
-                                # For non-playbook files, just display content
+                        # For Ansible, use RemoteRunLib's built-in Ansible method
+                        if script_type == "ansible":
+                            client = SSHClient(
+                                machine["host"],
+                                machine["username"],
+                                machine.get("password"),
+                                machine.get("port", 22),
+                                machine.get("key"),
+                            )
+                            # Note: No need to login for Ansible - it handles its own connection
+                            
+                            if custom_command:
+                                # For custom commands, just run them locally
+                                import subprocess
                                 try:
-                                    with open(os.path.join(dir_path, filename), 'r') as f:
-                                        output = f.read()
-                                    errors = ""
+                                    cd_command = f"cd {dir_path}"
+                                    exec_command = f"{cd_command} && {custom_command}"
+                                    result = subprocess.run(
+                                        exec_command,
+                                        shell=True,
+                                        capture_output=True,
+                                        text=True,
+                                        timeout=300
+                                    )
+                                    output = result.stdout
+                                    errors = result.stderr if result.returncode != 0 else ""
                                 except Exception as e:
                                     output = ""
                                     errors = str(e)
-                        
-                        t1 = time.time()
-                        # No need to close client for Ansible as it manages its own connections
-                    
-                    else:
-                        # For other script types, upload entire directory to remote machine and execute there
-                        client = SSHClient(
-                            machine["host"],
-                            machine["username"],
-                            machine.get("password"),
-                            machine.get("port", 22),
-                            machine.get("key"),
-                        )
-                        client.login()
-                        
-                        import time
-                        t0 = time.time()
-                        
-                        # Always upload the entire directory to maintain context and dependencies
-                        print(f"Uploading directory {dir_path} to remote machine...")
-                        remote_dir_path = client.send_Directory(dir_path)
-                        
-                        if not remote_dir_path:
-                            raise Exception("Failed to upload directory to remote machine")
-                        
-                        print(f"Directory uploaded to: {remote_dir_path}")
-                        
-                        # Detect remote OS to determine appropriate commands
-                        remote_os_info = client.get_remote_os()
-                        remote_os = remote_os_info.get("os", "linux").lower()
-                        print(f"Detected remote OS: {remote_os}")
-                        
-                        # Build execution command based on script type and custom command
-                        if custom_command:
-                            # Use custom command in the remote directory
-                            exec_command = f"cd '{remote_dir_path}' && {custom_command}"
-                            print(f"Using custom command: {exec_command}")
-                        else:
-                            # Use built-in commands for specific script types with OS-aware execution
-                            if script_type == "python":
-                                if filename.endswith('.py'):
-                                    # Determine Python command based on remote OS with fallback logic
-                                    if remote_os == "windows":
-                                        # On Windows, try python first
-                                        python_cmd = "python"
-                                    else:  # Linux, Unix, etc.
-                                        # On Linux, prefer python3 but check availability
-                                        python_cmd = "python3"
-                                        # Check if python3 is available, fallback to python if not
-                                        check_python3, _ = client.run_command("which python3 2>/dev/null || command -v python3", timeout=5, verbose=False)
-                                        if not check_python3.strip():
-                                            # python3 not found, try python
-                                            check_python, _ = client.run_command("which python 2>/dev/null || command -v python", timeout=5, verbose=False)
-                                            if check_python.strip():
-                                                python_cmd = "python"
-                                            else:
-                                                # Neither found, use python3 anyway and let it fail with a proper error
-                                                python_cmd = "python3"
-                                    
-                                    # Python execution in remote directory with full context
-                                    exec_command = f"cd '{remote_dir_path}' && {python_cmd} {filename}"
-                                    print(f"Python execution command: {exec_command}")
-                                else:
-                                    # Generic file execution
-                                    if remote_os == "windows":
-                                        exec_command = f"cd '{remote_dir_path}' && type {filename}"
-                                    else:
-                                        exec_command = f"cd '{remote_dir_path}' && cat {filename}"
-                            elif script_type == "terraform":
-                                if filename.endswith('.tf'):
-                                    # Terraform execution with proper initialization
-                                    exec_command = f"cd '{remote_dir_path}' && terraform init && terraform plan -out=tfplan && terraform apply -auto-approve tfplan"
-                                else:
-                                    # Generic file execution
-                                    if remote_os == "windows":
-                                        exec_command = f"cd '{remote_dir_path}' && type {filename}"
-                                    else:
-                                        exec_command = f"cd '{remote_dir_path}' && cat {filename}"
                             else:
-                                # Generic execution based on OS
-                                if remote_os == "windows":
-                                    exec_command = f"cd '{remote_dir_path}' && type {filename}"
+                                if filename.endswith(('.yml', '.yaml')):
+                                    # Use RemoteRunLib's Ansible method - it runs locally and targets the remote machine
+                                    playbook_path = os.path.join(dir_path, filename)
+                                    result = client.run_ansible_playbook(playbook_path)
+                                    
+                                    if isinstance(result, dict):
+                                        output = result.get("output", "")
+                                        errors = result.get("error", "") if not result.get("success", True) else ""
+                                    else:
+                                        output = str(result)
+                                        errors = ""
                                 else:
-                                    exec_command = f"cd '{remote_dir_path}' && cat {filename}"
+                                    # For non-playbook files, just display content
+                                    try:
+                                        with open(os.path.join(dir_path, filename), 'r') as f:
+                                            output = f.read()
+                                        errors = ""
+                                    except Exception as e:
+                                        output = ""
+                                        errors = str(e)
+                            
+                            t1 = time.time()
+                            # No need to close client for Ansible as it manages its own connections
                         
-                        # Execute command on remote machine
-                        output, errors = client.run_command(exec_command)
+                        else:
+                            # For other script types, upload entire directory to remote machine and execute there
+                            client = SSHClient(
+                                machine["host"],
+                                machine["username"],
+                                machine.get("password"),
+                                machine.get("port", 22),
+                                machine.get("key"),
+                            )
+                            client.login()
+                            
+                            # Always upload the entire directory to maintain context and dependencies
+                            remote_dir_path = client.send_Directory(dir_path)
+                            
+                            if not remote_dir_path:
+                                raise Exception("Failed to upload directory to remote machine")
+                            
+                            # Detect remote OS to determine appropriate commands
+                            remote_os_info = client.get_remote_os()
+                            remote_os = remote_os_info.get("os", "linux").lower()
+                            
+                            # Build execution command based on script type and custom command
+                            if custom_command:
+                                # Use custom command in the remote directory
+                                exec_command = f"cd '{remote_dir_path}' && {custom_command}"
+                            else:
+                                # Use built-in commands for specific script types with OS-aware execution
+                                if script_type == "python":
+                                    if filename.endswith('.py'):
+                                        # Determine Python command based on remote OS with fallback logic
+                                        if remote_os == "windows":
+                                            # On Windows, try python first
+                                            python_cmd = "python"
+                                        else:  # Linux, Unix, etc.
+                                            # On Linux, prefer python3 but check availability
+                                            python_cmd = "python3"
+                                            # Check if python3 is available, fallback to python if not
+                                            check_python3, _ = client.run_command("which python3 2>/dev/null || command -v python3", timeout=5, verbose=False)
+                                            if not check_python3.strip():
+                                                # python3 not found, try python
+                                                check_python, _ = client.run_command("which python 2>/dev/null || command -v python", timeout=5, verbose=False)
+                                                if check_python.strip():
+                                                    python_cmd = "python"
+                                                else:
+                                                    # Neither found, use python3 anyway and let it fail with a proper error
+                                                    python_cmd = "python3"
+                                        
+                                        # Python execution in remote directory with full context
+                                        exec_command = f"cd '{remote_dir_path}' && {python_cmd} {filename}"
+                                    else:
+                                        # Generic file execution
+                                        if remote_os == "windows":
+                                            exec_command = f"cd '{remote_dir_path}' && type {filename}"
+                                        else:
+                                            exec_command = f"cd '{remote_dir_path}' && cat {filename}"
+                                elif script_type == "terraform":
+                                    if filename.endswith('.tf'):
+                                        # Terraform execution with proper initialization
+                                        exec_command = f"cd '{remote_dir_path}' && terraform init && terraform plan -out=tfplan && terraform apply -auto-approve tfplan"
+                                    else:
+                                        # Generic file execution
+                                        if remote_os == "windows":
+                                            exec_command = f"cd '{remote_dir_path}' && type {filename}"
+                                        else:
+                                            exec_command = f"cd '{remote_dir_path}' && cat {filename}"
+                                else:
+                                    # Generic execution based on OS
+                                    if remote_os == "windows":
+                                        exec_command = f"cd '{remote_dir_path}' && type {filename}"
+                                    else:
+                                        exec_command = f"cd '{remote_dir_path}' && cat {filename}"
+                            
+                            # Execute command on remote machine
+                            output, errors = client.run_command(exec_command)
+                            
+                            t1 = time.time()
+                            client.close()
                         
-                        t1 = time.time()
-                        client.close()
-                    
-                    status = "success" if not errors else "failed"
-                    completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                    duration = t1 - t0
-                    
-                    # Insert execution history
-                    exec_data = {
-                        "id": str(uuid.uuid4()),
-                        "machine_id": machine_id,
-                        "type": f"{script_type}_directory",
-                        "status": status,
-                        "command": f"{dir_name}/{filename}",
-                        "output": str(output),
-                        "started_at": started_at,
-                        "completed_at": completed_at,
-                        "duration": duration,
-                        "logs": f"Executed from directory: {dir_name}",
-                    }
-                    self._insert_execution(exec_data)
-                    
-                    return jsonify({
-                        "success": True,
-                        "output": output,
-                        "directory": dir_name,
-                        "filename": filename,
-                        "execution_time": duration
-                    })
-                    
-                except Exception as e:
-                    completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                    duration = 0
-                    
-                    # Insert failed execution history
-                    exec_data = {
-                        "id": str(uuid.uuid4()),
-                        "machine_id": machine_id,
-                        "type": f"{script_type}_directory",
-                        "status": "failed",
-                        "command": f"{dir_name}/{filename}",
-                        "output": "",
-                        "started_at": started_at,
-                        "completed_at": completed_at,
-                        "duration": duration,
-                        "logs": str(e),
-                    }
-                    self._insert_execution(exec_data)
-                    
-                    return jsonify({"success": False, "error": str(e)}), 500
+                        success = not errors
+                        duration = t1 - t0
+                        
+                        return {
+                            "success": success,
+                            "output": output,
+                            "errors": errors,
+                            "duration": duration,
+                            "directory": dir_name,
+                            "filename": filename
+                        }
+                        
+                    except Exception as e:
+                        return {"success": False, "errors": str(e)}
+                
+                # Submit to thread pool
+                future = self.executor.submit(self._execute_async, exec_data, execute_directory_task)
+                self.execution_threads[execution_id] = {"future": future, "status": "queued"}
+                
+                # Emit notification
+                socketio.emit('notification', {
+                    'type': 'info',
+                    'message': f'{script_type.title()} directory execution started. Check Dashboard for output/logs.',
+                    'duration': 10000
+                }, namespace='/ws')
+                
+                # Emit execution started event
+                socketio.emit('execution_started', {
+                    'execution_id': execution_id,
+                    'type': f'{script_type}_directory',
+                    'command': command_desc,
+                    'machine_id': machine_id
+                }, namespace='/ws')
+                
+                return jsonify({
+                    "success": True, 
+                    "execution_id": execution_id,
+                    "message": f"{script_type.title()} directory execution started in background",
+                    "status": "queued"
+                })
                     
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
@@ -2194,9 +2407,26 @@ This directory contains {script_type} files and configurations.
             if not image_name:
                 return jsonify({"success": False, "error": "Image name is required"}), 400
             
+            # Create execution record
+            execution_id = str(uuid.uuid4())
             started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
             
-            try:
+            exec_data = {
+                "id": execution_id,
+                "machine_id": machine_id,
+                "type": "docker_run",
+                "status": "queued",
+                "command": f"docker run {image_name}",
+                "output": "",
+                "started_at": started_at,
+                "completed_at": None,
+                "duration": 0,
+                "logs": "",
+            }
+            self._insert_execution(exec_data)
+            
+            # Define the execution function
+            def execute_docker_run_task():
                 if machine_id == "localhost":
                     # Local Docker run
                     import subprocess
@@ -2226,19 +2456,19 @@ This directory contains {script_type} files and configurations.
 
                     print("Running command:", " ".join(cmd))
                     
-                    t0 = time.time()
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-                    t1 = time.time()
                     
                     success = result.returncode == 0
                     output = result.stdout.strip()
                     errors = result.stderr
                     command = " ".join(cmd)
+                    
+                    return {"success": success, "output": output, "errors": errors, "command": command}
                 else:
                     # Remote Docker run
                     machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
                     if not machine:
-                        return jsonify({"success": False, "error": "Machine not found"}), 404
+                        return {"success": False, "output": "", "errors": "Machine not found"}
                     
                     client = SSHClient(
                         machine["host"],
@@ -2248,59 +2478,38 @@ This directory contains {script_type} files and configurations.
                         machine.get("key"),
                     )
                     client.login()
-                    t0 = time.time()
                     result = client.docker_run_container(
                         image_name, container_name, ports, volumes, env_vars, detach, additional_args
                     )
-                    t1 = time.time()
                     client.close()
                     
-                    success = result.get("success", False)
-                    output = result.get("output", "")
-                    errors = result.get("errors", "")
-                    command = result.get("command", "")
-                
-                # Log execution
-                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                exec_data = {
-                    "id": str(uuid.uuid4()),
-                    "machine_id": machine_id,
-                    "type": "docker_run",
-                    "status": "success" if success else "failed",
-                    "command": command,
-                    "output": output,
-                    "started_at": started_at,
-                    "completed_at": completed_at,
-                    "duration": t1 - t0,
-                    "logs": errors or "",
-                }
-                self._insert_execution(exec_data)
-                
-                return jsonify({
-                    "success": success,
-                    "output": output,
-                    "errors": errors,
-                    "command": command
-                })
-                
-            except Exception as e:
-                # Log failed execution
-                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                exec_data = {
-                    "id": str(uuid.uuid4()),
-                    "machine_id": machine_id,
-                    "type": "docker_run",
-                    "status": "failed",
-                    "command": f"docker run {image_name}",
-                    "output": "",
-                    "started_at": started_at,
-                    "completed_at": completed_at,
-                    "duration": 0,
-                    "logs": str(e),
-                }
-                self._insert_execution(exec_data)
-                
-                return jsonify({"success": False, "error": str(e)}), 500
+                    return result
+            
+            # Submit to thread pool
+            future = self.executor.submit(self._execute_async, exec_data, execute_docker_run_task)
+            self.execution_threads[execution_id] = {"future": future, "status": "queued"}
+            
+            # Emit notification
+            socketio.emit('notification', {
+                'type': 'info',
+                'message': f'Docker container execution started. Check Dashboard for output/logs.',
+                'duration': 10000
+            }, namespace='/ws')
+            
+            # Emit execution started event
+            socketio.emit('execution_started', {
+                'execution_id': execution_id,
+                'type': 'docker_run',
+                'command': f"docker run {image_name}",
+                'machine_id': machine_id
+            }, namespace='/ws')
+            
+            return jsonify({
+                "success": True, 
+                "execution_id": execution_id,
+                "message": "Docker container execution started in background",
+                "status": "queued"
+            })
 
         @app.route("/api/docker/debug", methods=["POST"])
         def docker_debug():
@@ -2654,12 +2863,11 @@ This directory contains {script_type} files and configurations.
 
         @app.route("/api/docker/compose/up", methods=["POST"])
         def docker_compose_up():
-            """Run docker-compose up."""
-            import datetime, time, os, subprocess
+            """Run docker-compose up with temp file."""
+            import datetime, time, os, subprocess, tempfile, shutil
             data = request.json
             machine_id = data.get("machine_id")
             compose_content = data.get("compose_content")
-            compose_file = data.get("compose_file", "docker-compose.yml")
             detach = data.get("detach", True)
             build = data.get("build", False)
             
@@ -2667,30 +2875,40 @@ This directory contains {script_type} files and configurations.
                 return jsonify({"success": False, "error": "Docker compose content is required"}), 400
             
             started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            temp_dir = None
             
             try:
                 if machine_id == "localhost":
-                    # Local Docker Compose
-                    import tempfile
-                    with tempfile.TemporaryDirectory() as temp_dir:
-                        compose_file_path = os.path.join(temp_dir, compose_file)
-                        with open(compose_file_path, 'w') as f:
-                            f.write(compose_content)
-                        
-                        cmd = ["docker-compose", "-f", compose_file_path, "up"]
-                        if detach:
-                            cmd.append("-d")
-                        if build:
-                            cmd.append("--build")
-                        
-                        t0 = time.time()
-                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-                        t1 = time.time()
-                        
-                        success = result.returncode == 0
-                        output = result.stdout.strip()
-                        errors = result.stderr
-                        command = " ".join(cmd)
+                    # Create temporary file with content
+                    temp_dir = tempfile.mkdtemp()
+                    compose_file_path = os.path.join(temp_dir, "docker-compose.yml")
+                    with open(compose_file_path, 'w') as f:
+                        f.write(compose_content)
+                    
+                    # Check if docker compose command exists, fallback to docker-compose
+                    try:
+                        subprocess.run(["docker", "compose", "version"], capture_output=True, check=True)
+                        cmd = ["docker", "compose", "-f", compose_file_path, "up"]
+                    except (subprocess.CalledProcessError, FileNotFoundError):
+                        try:
+                            subprocess.run(["docker-compose", "version"], capture_output=True, check=True)
+                            cmd = ["docker-compose", "-f", compose_file_path, "up"]
+                        except (subprocess.CalledProcessError, FileNotFoundError):
+                            return jsonify({"success": False, "error": "Neither 'docker compose' nor 'docker-compose' command found"}), 500
+                    
+                    if detach:
+                        cmd.append("-d")
+                    if build:
+                        cmd.append("--build")
+                    
+                    t0 = time.time()
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+                    t1 = time.time()
+                    
+                    success = result.returncode == 0
+                    output = result.stdout.strip()
+                    errors = result.stderr
+                    command = " ".join(cmd)
                 else:
                     # Remote Docker Compose
                     machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
@@ -2706,8 +2924,7 @@ This directory contains {script_type} files and configurations.
                     )
                     client.login()
                     
-                    # Create temporary compose file on remote
-                    import tempfile
+                    # Create temporary compose file and upload
                     with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as tmp_compose:
                         tmp_compose.write(compose_content)
                         tmp_compose.flush()
@@ -2728,7 +2945,7 @@ This directory contains {script_type} files and configurations.
                     success = result.get("success", False)
                     output = result.get("output", "")
                     errors = result.get("errors", "")
-                    command = result.get("command", f"docker-compose up")
+                    command = result.get("command", "docker compose up")
                 
                 # Log execution
                 completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
@@ -2760,7 +2977,7 @@ This directory contains {script_type} files and configurations.
                     "machine_id": machine_id,
                     "type": "docker_compose_up",
                     "status": "failed",
-                    "command": f"docker-compose up",
+                    "command": "docker compose up",
                     "output": "",
                     "started_at": started_at,
                     "completed_at": completed_at,
@@ -2769,6 +2986,80 @@ This directory contains {script_type} files and configurations.
                 }
                 self._insert_execution(exec_data)
                 
+                return jsonify({"success": False, "error": str(e)}), 500
+            finally:
+                # Clean up temporary directory
+                if temp_dir and os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+
+        @app.route("/api/docker/compose/save", methods=["POST"])
+        def save_docker_compose():
+            """Save docker-compose file to machine."""
+            import datetime, os
+            data = request.json
+            machine_id = data.get("machine_id")
+            compose_content = data.get("compose_content")
+            compose_file = data.get("compose_file", "docker-compose.yml")
+            
+            if not compose_content:
+                return jsonify({"success": False, "error": "Docker compose content is required"}), 400
+            
+            # Ensure it has .yml or .yaml extension
+            if not compose_file.endswith('.yml') and not compose_file.endswith('.yaml'):
+                compose_file += '.yml'
+            
+            try:
+                if machine_id == "localhost":
+                    # Save locally to current working directory or projects folder
+                    projects_dir = os.path.join(os.getcwd(), "docker_projects")
+                    os.makedirs(projects_dir, exist_ok=True)
+                    
+                    compose_file_path = os.path.join(projects_dir, compose_file)
+                    with open(compose_file_path, 'w') as f:
+                        f.write(compose_content)
+                    
+                    return jsonify({
+                        "success": True,
+                        "message": f"Compose file saved to {compose_file_path}",
+                        "file_path": compose_file_path
+                    })
+                else:
+                    # Save to remote machine
+                    machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+                    if not machine:
+                        return jsonify({"success": False, "error": "Machine not found"}), 404
+                    
+                    client = SSHClient(
+                        machine["host"],
+                        machine["username"],
+                        machine.get("password"),
+                        machine.get("port", 22),
+                        machine.get("key"),
+                    )
+                    client.login()
+                    
+                    # Create temporary local file
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as tmp_file:
+                        tmp_file.write(compose_content)
+                        tmp_file.flush()
+                        
+                        # Upload to remote machine
+                        remote_path = client.send_File(tmp_file.name, target_filename=compose_file)
+                        os.unlink(tmp_file.name)
+                        
+                        client.close()
+                        
+                        if remote_path:
+                            return jsonify({
+                                "success": True,
+                                "message": f"Compose file saved to {remote_path}",
+                                "file_path": remote_path
+                            })
+                        else:
+                            return jsonify({"success": False, "error": "Failed to save compose file to remote machine"}), 500
+                            
+            except Exception as e:
                 return jsonify({"success": False, "error": str(e)}), 500
 
         @app.route("/api/docker/system/prune", methods=["POST"])
@@ -2890,6 +3181,657 @@ This directory contains {script_type} files and configurations.
                 self._insert_execution(exec_data)
                 
                 return jsonify({"success": False, "error": str(e)}), 500
+
+        @app.route("/api/docker/project/execute", methods=["POST"])
+        def execute_docker_project():
+            """Execute Docker project from directory."""
+            import datetime, time, os, subprocess, tempfile, shutil
+            data = request.json
+            machine_id = data.get("machine_id")
+            directory_name = data.get("directory_name")
+            compose_file = data.get("compose_file")
+            
+            # Docker options
+            detach = data.get("detach", True)
+            build = data.get("build", False)
+            force_recreate = data.get("force_recreate", False)
+            remove_orphans = data.get("remove_orphans", False)
+            action = data.get("action", "up")  # up, stop, down
+            
+            if not directory_name:
+                return jsonify({"success": False, "error": "Directory name is required"}), 400
+                
+            if not machine_id:
+                return jsonify({"success": False, "error": "Machine selection is required"}), 400
+                
+            started_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                # Get project directory path
+                project_dir = os.path.join(self.directories_base_path, 'docker', directory_name)
+                
+                if not os.path.exists(project_dir):
+                    return jsonify({"success": False, "error": f"Project directory '{directory_name}' not found"}), 404
+                
+                # Find docker-compose file if not specified
+                if not compose_file:
+                    compose_candidates = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']
+                    for candidate in compose_candidates:
+                        candidate_path = os.path.join(project_dir, candidate)
+                        if os.path.exists(candidate_path):
+                            compose_file = candidate
+                            break
+                    
+                    if not compose_file:
+                        return jsonify({"success": False, "error": "No docker-compose file found in project directory"}), 404
+                
+                compose_file_path = os.path.join(project_dir, compose_file)
+                
+                if not os.path.exists(compose_file_path):
+                    return jsonify({"success": False, "error": f"Compose file '{compose_file}' not found in project directory"}), 404
+                
+                if machine_id == "localhost":
+                    # Local execution
+                    
+                    # Check for docker compose command
+                    try:
+                        subprocess.run(["docker", "compose", "version"], capture_output=True, check=True)
+                        cmd = ["docker", "compose", "-f", compose_file_path]
+                    except (subprocess.CalledProcessError, FileNotFoundError):
+                        try:
+                            subprocess.run(["docker-compose", "version"], capture_output=True, check=True)
+                            cmd = ["docker-compose", "-f", compose_file_path]
+                        except (subprocess.CalledProcessError, FileNotFoundError):
+                            return jsonify({"success": False, "error": "Neither 'docker compose' nor 'docker-compose' command found"}), 500
+                    
+                    # Add action (up, stop, down)
+                    cmd.append(action)
+                    
+                    # Add options based on action
+                    if action == "up":
+                        if detach:
+                            cmd.append("-d")
+                        if build:
+                            cmd.append("--build")
+                        if force_recreate:
+                            cmd.append("--force-recreate")
+                        if remove_orphans:
+                            cmd.append("--remove-orphans")
+                    
+                    # Execute in project directory
+                    t0 = time.time()
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, cwd=project_dir)
+                    t1 = time.time()
+                    
+                    success = result.returncode == 0
+                    output = result.stdout.strip()
+                    errors = result.stderr
+                    command = " ".join(cmd)
+                else:
+                    # Remote execution
+                    machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+                    if not machine:
+                        return jsonify({"success": False, "error": "Machine not found"}), 404
+                    
+                    client = SSHClient(
+                        machine["host"],
+                        machine["username"],
+                        machine.get("password"),
+                        machine.get("port", 22),
+                        machine.get("key"),
+                    )
+                    client.login()
+                    
+                    # Send entire project directory to remote machine
+                    remote_project_path = client.send_Directory(project_dir)
+                    if not remote_project_path:
+                        client.close()
+                        return jsonify({"success": False, "error": "Failed to upload project directory"})
+                    
+                    # Build docker compose command for remote execution
+                    remote_compose_path = os.path.join(remote_project_path, compose_file).replace('\\', '/')
+                    
+                    # Execute docker compose on remote
+                    t0 = time.time()
+                    result = client.docker_compose_project_action(remote_compose_path, action, detach, build, force_recreate, remove_orphans)
+                    t1 = time.time()
+                    client.close()
+                    
+                    success = result.get("success", False)
+                    output = result.get("output", "")
+                    errors = result.get("errors", "")
+                    command = result.get("command", f"docker compose {action}")
+                
+                # Log execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": f"docker_project_{action}",
+                    "status": "success" if success else "failed",
+                    "command": f"{command} (project: {directory_name})",
+                    "output": output,
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": t1 - t0,
+                    "logs": errors or "",
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({
+                    "success": success,
+                    "output": output,
+                    "errors": errors,
+                    "project": directory_name,
+                    "action": action
+                })
+                
+            except Exception as e:
+                # Log failed execution
+                completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                exec_data = {
+                    "id": str(uuid.uuid4()),
+                    "machine_id": machine_id,
+                    "type": f"docker_project_{action}",
+                    "status": "failed",
+                    "command": f"docker compose {action} (project: {directory_name})",
+                    "output": "",
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "duration": 0,
+                    "logs": str(e),
+                }
+                self._insert_execution(exec_data)
+                
+                return jsonify({"success": False, "error": str(e)}), 500
+
+        # === OVERVIEW API ENDPOINTS ===
+        
+        @app.route('/api/python/overview', methods=['POST'])
+        def python_overview():
+            """Get Python environment overview for a machine."""
+            data = request.json
+            machine_id = data.get('machine_id')
+            force_refresh = data.get('force_refresh', False)
+            
+            if not machine_id:
+                return jsonify({'success': False, 'error': 'Machine ID is required'}), 400
+            
+            # Check cache first (unless force refresh is requested)
+            if not force_refresh and machine_id in self.overview_cache['python']:
+                return jsonify({
+                    'success': True, 
+                    'overview': self.overview_cache['python'][machine_id],
+                    'cached': True
+                })
+            
+            if machine_id == "localhost":
+                # Local Python overview
+                try:
+                    import subprocess
+                    import sys
+                    import platform
+                    overview_data = {}
+                    
+                    # Detect OS for command strategy
+                    is_windows = platform.system().lower() == 'windows'
+                    python_commands = ["python", "python3", "py"] if is_windows else ["python3", "python"]
+                    pip_commands = ["pip", "pip3"] if is_windows else ["pip3", "pip"]
+                    
+                    # Get Python version - try commands in order
+                    python_output = None
+                    python_cmd = None
+                    for cmd in python_commands:
+                        try:
+                            result = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=10)
+                            if result.returncode == 0 and result.stdout:
+                                python_output = result.stdout.strip()
+                                python_cmd = cmd
+                                break
+                        except:
+                            continue
+                    
+                    overview_data["python_version"] = python_output if python_output else "Not installed"
+                    overview_data["python_command"] = python_cmd if python_cmd else "None"
+                    
+                    # Get pip version - try commands in order
+                    pip_output = None
+                    pip_cmd = None
+                    for cmd in pip_commands:
+                        try:
+                            result = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=10)
+                            if result.returncode == 0 and result.stdout:
+                                pip_output = result.stdout.strip()
+                                pip_cmd = cmd
+                                break
+                        except:
+                            continue
+                    
+                    overview_data["pip_version"] = pip_output if pip_output else "Not installed"
+                    overview_data["pip_command"] = pip_cmd if pip_cmd else "None"
+                    
+                    # Get virtualenv support
+                    if python_cmd:
+                        try:
+                            venv_result = subprocess.run([python_cmd, "-m", "venv", "--help"], capture_output=True, text=True, timeout=10)
+                            overview_data["virtualenv_support"] = "Available" if venv_result.returncode == 0 else "Not available"
+                        except:
+                            overview_data["virtualenv_support"] = "Not available"
+                    else:
+                        overview_data["virtualenv_support"] = "Not available"
+                    
+                    # Get installed packages count
+                    if pip_cmd:
+                        try:
+                            packages_result = subprocess.run([pip_cmd, "list"], capture_output=True, text=True, timeout=30)
+                            if packages_result.returncode == 0:
+                                package_count = len(packages_result.stdout.strip().split('\n')) - 2
+                                overview_data["installed_packages"] = max(0, package_count)
+                            else:
+                                overview_data["installed_packages"] = "Unknown"
+                        except:
+                            overview_data["installed_packages"] = "Unknown"
+                    else:
+                        overview_data["installed_packages"] = "Unknown"
+                    
+                    # Get Python path
+                    if python_cmd:
+                        overview_data["python_path"] = sys.executable
+                    else:
+                        overview_data["python_path"] = "Unknown"
+                    
+                    # Get architecture
+                    overview_data["architecture"] = platform.machine()
+                    
+                    # Cache the result
+                    self.overview_cache['python'][machine_id] = overview_data
+                    
+                    return jsonify({'success': True, 'overview': overview_data, 'cached': False})
+                    
+                except Exception as e:
+                    return jsonify({'success': False, 'error': str(e)}), 500
+            
+            # Remote Python overview
+            machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+            if not machine:
+                return jsonify({'success': False, 'error': 'Machine not found'}), 404
+            
+            try:
+                client = SSHClient(
+                    machine["host"],
+                    machine["username"],
+                    machine.get("password"),
+                    machine.get("port", 22),
+                    machine.get("key"),
+                )
+                client.login()
+                result = client.get_python_overview()
+                client.close()
+                
+                if result.get('success'):
+                    # Cache the result
+                    self.overview_cache['python'][machine_id] = result.get('overview', {})
+                    result['cached'] = False
+                
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @app.route('/api/ansible/overview', methods=['POST'])
+        def ansible_overview():
+            """Get Ansible environment overview for a machine."""
+            data = request.json
+            machine_id = data.get('machine_id')
+            force_refresh = data.get('force_refresh', False)
+            
+            if not machine_id:
+                return jsonify({'success': False, 'error': 'Machine ID is required'}), 400
+            
+            # Check cache first (unless force refresh is requested)
+            if not force_refresh and machine_id in self.overview_cache['ansible']:
+                return jsonify({
+                    'success': True, 
+                    'overview': self.overview_cache['ansible'][machine_id],
+                    'cached': True
+                })
+            
+            if machine_id == "localhost":
+                # Local Ansible overview
+                try:
+                    import subprocess
+                    overview_data = {}
+                    
+                    # Get Ansible version
+                    try:
+                        ansible_result = subprocess.run(["ansible", "--version"], capture_output=True, text=True, timeout=10)
+                        if ansible_result.returncode == 0:
+                            lines = ansible_result.stdout.strip().split('\n')
+                            overview_data["ansible_version"] = lines[0] if lines else "Unknown"
+                            
+                            # Parse additional info
+                            for line in lines:
+                                if "ansible core" in line.lower():
+                                    overview_data["ansible_core_version"] = line.strip()
+                                elif "config file" in line.lower():
+                                    overview_data["config_file"] = line.split('=')[1].strip() if '=' in line else "Default"
+                                elif "python version" in line.lower():
+                                    overview_data["python_version"] = line.split('=')[1].strip() if '=' in line else "Unknown"
+                                elif "executable location" in line.lower():
+                                    overview_data["executable_location"] = line.split('=')[1].strip() if '=' in line else "Unknown"
+                        else:
+                            overview_data["ansible_version"] = "Not installed"
+                            overview_data["ansible_core_version"] = "Not installed"
+                            overview_data["config_file"] = "N/A"
+                            overview_data["python_version"] = "N/A"
+                            overview_data["executable_location"] = "N/A"
+                    except:
+                        overview_data["ansible_version"] = "Not installed"
+                        overview_data["ansible_core_version"] = "Not installed"
+                        overview_data["config_file"] = "N/A"
+                        overview_data["python_version"] = "N/A"
+                        overview_data["executable_location"] = "N/A"
+                    
+                    # Check other tools
+                    try:
+                        playbook_result = subprocess.run(["ansible-playbook", "--version"], capture_output=True, text=True, timeout=10)
+                        overview_data["playbook_available"] = "Available" if playbook_result.returncode == 0 else "Not available"
+                    except:
+                        overview_data["playbook_available"] = "Not available"
+                    
+                    try:
+                        galaxy_result = subprocess.run(["ansible-galaxy", "--version"], capture_output=True, text=True, timeout=10)
+                        overview_data["galaxy_available"] = "Available" if galaxy_result.returncode == 0 else "Not available"
+                    except:
+                        overview_data["galaxy_available"] = "Not available"
+                    
+                    try:
+                        vault_result = subprocess.run(["ansible-vault", "--help"], capture_output=True, text=True, timeout=10)
+                        overview_data["vault_available"] = "Available" if vault_result.returncode == 0 else "Not available"
+                    except:
+                        overview_data["vault_available"] = "Not available"
+                    
+                    # Get collections count
+                    try:
+                        collections_result = subprocess.run(["ansible-galaxy", "collection", "list"], capture_output=True, text=True, timeout=30)
+                        collections_count = len([line for line in collections_result.stdout.split('\n') if line.strip() and not line.startswith('#')]) if collections_result.returncode == 0 else 0
+                        overview_data["installed_collections"] = max(0, collections_count - 2)  # Remove header lines
+                    except:
+                        overview_data["installed_collections"] = "Unknown"
+                    
+                    # Cache the result
+                    self.overview_cache['ansible'][machine_id] = overview_data
+                    
+                    return jsonify({'success': True, 'overview': overview_data, 'cached': False})
+                    
+                except Exception as e:
+                    return jsonify({'success': False, 'error': str(e)}), 500
+            
+            # Remote Ansible overview
+            machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+            if not machine:
+                return jsonify({'success': False, 'error': 'Machine not found'}), 404
+            
+            try:
+                client = SSHClient(
+                    machine["host"],
+                    machine["username"],
+                    machine.get("password"),
+                    machine.get("port", 22),
+                    machine.get("key"),
+                )
+                client.login()
+                result = client.get_ansible_overview()
+                client.close()
+                
+                if result.get('success'):
+                    # Cache the result
+                    self.overview_cache['ansible'][machine_id] = result.get('overview', {})
+                    result['cached'] = False
+                
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @app.route('/api/terraform/overview', methods=['POST'])
+        def terraform_overview():
+            """Get Terraform environment overview for a machine."""
+            data = request.json
+            machine_id = data.get('machine_id')
+            force_refresh = data.get('force_refresh', False)
+            
+            if not machine_id:
+                return jsonify({'success': False, 'error': 'Machine ID is required'}), 400
+            
+            # Check cache first (unless force refresh is requested)
+            if not force_refresh and machine_id in self.overview_cache['terraform']:
+                return jsonify({
+                    'success': True, 
+                    'overview': self.overview_cache['terraform'][machine_id],
+                    'cached': True
+                })
+            
+            if machine_id == "localhost":
+                # Local Terraform overview
+                try:
+                    import subprocess
+                    import platform
+                    overview_data = {}
+                    
+                    # Get Terraform version
+                    try:
+                        terraform_result = subprocess.run(["terraform", "version"], capture_output=True, text=True, timeout=10)
+                        if terraform_result.returncode == 0:
+                            lines = terraform_result.stdout.strip().split('\n')
+                            overview_data["terraform_version"] = lines[0] if lines else "Unknown"
+                            
+                            # Parse platform info
+                            for line in lines:
+                                if "on " in line.lower() and "terraform" in lines[0].lower():
+                                    overview_data["platform"] = line.strip()
+                                    break
+                            else:
+                                overview_data["platform"] = f"on {platform.system()}"
+                            
+                            # Parse provider versions
+                            provider_versions = {}
+                            for line in lines[1:]:
+                                if "provider" in line.lower():
+                                    provider_versions[line.strip()] = "Installed"
+                            overview_data["provider_versions"] = provider_versions
+                        else:
+                            overview_data["terraform_version"] = "Not installed"
+                            overview_data["platform"] = "N/A"
+                            overview_data["provider_versions"] = {}
+                    except:
+                        overview_data["terraform_version"] = "Not installed"
+                        overview_data["platform"] = "N/A"
+                        overview_data["provider_versions"] = {}
+                    
+                    # Get workspace info
+                    try:
+                        workspace_result = subprocess.run(["terraform", "workspace", "show"], capture_output=True, text=True, timeout=10)
+                        overview_data["current_workspace"] = workspace_result.stdout.strip() if workspace_result.returncode == 0 else "default"
+                    except:
+                        overview_data["current_workspace"] = "default"
+                    
+                    # Check Terraform Cloud CLI
+                    try:
+                        tfc_result = subprocess.run(["terraform", "login", "--help"], capture_output=True, text=True, timeout=10)
+                        overview_data["cloud_cli_available"] = "Available" if tfc_result.returncode == 0 else "Not available"
+                    except:
+                        overview_data["cloud_cli_available"] = "Not available"
+                    
+                    # Get architecture
+                    try:
+                        overview_data["architecture"] = platform.machine()
+                    except:
+                        overview_data["architecture"] = "Unknown"
+                    
+                    # Check additional tools
+                    tools_status = {}
+                    for tool in ["terragrunt", "tflint", "terraform-docs", "checkov"]:
+                        try:
+                            tool_result = subprocess.run(["which", tool], capture_output=True, text=True, timeout=5)
+                            tools_status[tool] = "Available" if tool_result.returncode == 0 else "Not available"
+                        except:
+                            tools_status[tool] = "Not available"
+                    
+                    overview_data["additional_tools"] = tools_status
+                    
+                    # Cache the result
+                    self.overview_cache['terraform'][machine_id] = overview_data
+                    
+                    return jsonify({'success': True, 'overview': overview_data, 'cached': False})
+                    
+                except Exception as e:
+                    return jsonify({'success': False, 'error': str(e)}), 500
+            
+            # Remote Terraform overview
+            machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+            if not machine:
+                return jsonify({'success': False, 'error': 'Machine not found'}), 404
+            
+            try:
+                client = SSHClient(
+                    machine["host"],
+                    machine["username"],
+                    machine.get("password"),
+                    machine.get("port", 22),
+                    machine.get("key"),
+                )
+                client.login()
+                result = client.get_terraform_overview()
+                client.close()
+                
+                if result.get('success'):
+                    # Cache the result
+                    self.overview_cache['terraform'][machine_id] = result.get('overview', {})
+                    result['cached'] = False
+                
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @app.route('/api/machine/os-info', methods=['POST'])
+        def machine_os_info():
+            """Get OS information for a machine."""
+            data = request.json
+            machine_id = data.get('machine_id')
+            force_refresh = data.get('force_refresh', False)
+            
+            if not machine_id:
+                return jsonify({'success': False, 'error': 'Machine ID is required'}), 400
+            
+            # Check cache first (unless force refresh is requested)
+            if not force_refresh and machine_id in self.overview_cache['os_info']:
+                return jsonify({
+                    'success': True, 
+                    'os_info': self.overview_cache['os_info'][machine_id],
+                    'cached': True
+                })
+            
+            if machine_id == "localhost":
+                # Local OS info
+                try:
+                    import platform
+                    import subprocess
+                    os_data = {}
+                    
+                    system = platform.system()
+                    os_data["os_type"] = system.lower()
+                    os_data["distribution"] = platform.platform()
+                    os_data["architecture"] = platform.machine()
+                    
+                    if system == "Linux":
+                        try:
+                            # Get distribution info
+                            with open('/etc/os-release', 'r') as f:
+                                for line in f:
+                                    if line.startswith('PRETTY_NAME='):
+                                        os_data["distribution"] = line.split('=')[1].strip('"')
+                                        break
+                        except:
+                            pass
+                        
+                        # Get kernel version
+                        os_data["kernel_version"] = platform.release()
+                        
+                        # Get uptime
+                        try:
+                            uptime_result = subprocess.run(["uptime", "-p"], capture_output=True, text=True, timeout=5)
+                            os_data["uptime"] = uptime_result.stdout.strip() if uptime_result.returncode == 0 else "Unknown"
+                        except:
+                            os_data["uptime"] = "Unknown"
+                        
+                        # Get memory info
+                        try:
+                            with open('/proc/meminfo', 'r') as f:
+                                for line in f:
+                                    if line.startswith('MemTotal:'):
+                                        mem_kb = int(line.split()[1])
+                                        mem_gb = round(mem_kb / (1024*1024), 2)
+                                        os_data["total_memory"] = f"{mem_gb}GB"
+                                        break
+                        except:
+                            os_data["total_memory"] = "Unknown"
+                    
+                    elif system == "Windows":
+                        os_data["kernel_version"] = platform.release()
+                        
+                        try:
+                            # Get system uptime
+                            uptime_result = subprocess.run(["powershell", "-Command", "(Get-WmiObject -Class Win32_OperatingSystem).LastBootUpTime"], capture_output=True, text=True, timeout=10)
+                            os_data["uptime"] = "Available" if uptime_result.returncode == 0 else "Unknown"
+                        except:
+                            os_data["uptime"] = "Unknown"
+                        
+                        try:
+                            # Get memory info
+                            import psutil
+                            total_memory = psutil.virtual_memory().total
+                            mem_gb = round(total_memory / (1024**3), 2)
+                            os_data["total_memory"] = f"{mem_gb}GB"
+                        except:
+                            os_data["total_memory"] = "Unknown"
+                    
+                    else:
+                        os_data["kernel_version"] = platform.release()
+                        os_data["uptime"] = "Unknown"
+                        os_data["total_memory"] = "Unknown"
+                    
+                    # Cache the result
+                    self.overview_cache['os_info'][machine_id] = os_data
+                    
+                    return jsonify({'success': True, 'os_info': os_data, 'cached': False})
+                    
+                except Exception as e:
+                    return jsonify({'success': False, 'error': str(e)}), 500
+            
+            # Remote OS info
+            machine = next((m for m in self.machines if str(m.get("id")) == str(machine_id)), None)
+            if not machine:
+                return jsonify({'success': False, 'error': 'Machine not found'}), 404
+            
+            try:
+                client = SSHClient(
+                    machine["host"],
+                    machine["username"],
+                    machine.get("password"),
+                    machine.get("port", 22),
+                    machine.get("key"),
+                )
+                client.login()
+                result = client.get_machine_os_info()
+                client.close()
+                
+                if result.get('success'):
+                    # Cache the result
+                    self.overview_cache['os_info'][machine_id] = result.get('os_info', {})
+                    result['cached'] = False
+                
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)}), 500
 
         # Add this endpoint to support /api/test-connection for the UI
         @app.route('/api/test-connection', methods=['POST'])
