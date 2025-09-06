@@ -422,6 +422,36 @@ class Dashboard:
             self.machines = self._fetch_all_machines()
             return jsonify({"success": True, "machine": data, "created": True})
 
+        @app.route("/api/upload-key", methods=["POST"])
+        def upload_ssh_key():
+            """Upload an SSH private key file and return stored path."""
+            try:
+                if 'key_file' not in request.files:
+                    return jsonify({'success': False, 'error': 'No key_file part in request'}), 400
+                f = request.files['key_file']
+                if not f.filename:
+                    return jsonify({'success': False, 'error': 'Empty filename'}), 400
+                import re, time
+                safe_name = re.sub(r'[^A-Za-z0-9_.-]', '_', f.filename)
+                # Store under scripts/keys directory beside python/ansible/etc. (consistent location)
+                caller_path = os.path.abspath(sys.argv[0])
+                scripts_path = os.path.dirname(caller_path)
+                keys_dir = os.path.join(scripts_path, 'scripts', 'keys')
+                os.makedirs(keys_dir, exist_ok=True)
+                # Ensure restrictive permissions on directory
+                try:
+                    os.chmod(keys_dir, 0o700)
+                except Exception:
+                    pass
+                ts = int(time.time())
+                path = os.path.join(keys_dir, f"{ts}_{safe_name}")
+                f.save(path)
+                os.chmod(path, 0o600)
+                # Return path so frontend sets machine.key
+                return jsonify({'success': True, 'path': path})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)}), 500
+
         @app.route("/api/machines/<machine_id>", methods=["PUT"])
         def update_machine(machine_id):
             data = request.json
@@ -876,8 +906,8 @@ class Dashboard:
                 
                 if mode == "adhoc":
                     command = args
-                    module = module or "command"
-                    output = client.run_ansible_playbook(command, module=module, become=become)
+                    mod = module or "command"
+                    output = client.run_ansible_playbook(command, module=mod, become=become, force_adhoc=True)
                 else:
                     if script_content:
                         import tempfile
@@ -897,30 +927,29 @@ class Dashboard:
                 client.close()
                 return {'success': True, 'output': str(output), 'errors': ''}
             
-            # Submit to thread pool
-            future = self.executor.submit(self._execute_async, exec_data, execute_ansible_task)
-            self.execution_threads[execution_id] = {"future": future, "status": "queued"}
-            
-            # Emit notification
-            socketio.emit('notification', {
-                'type': 'info',
-                'message': f'Ansible execution started. Check Dashboard for output/logs.',
-                'duration': 10000
-            }, namespace='/ws')
-            
-            # Emit execution started event
-            socketio.emit('execution_started', {
-                'execution_id': execution_id,
-                'type': 'ansible',
-                'command': exec_command,
-                'machine_id': machine_id
-            }, namespace='/ws')
-            
+            # Execute synchronously so frontend waits for real output
+            start_time = time.time()
+            self._update_execution_status(execution_id, 'running')
+            try:
+                result = execute_ansible_task()
+                success = result.get('success', False)
+                output = result.get('output', '')
+                errors = result.get('errors', '')
+            except Exception as e:
+                success = False
+                output = ''
+                errors = str(e)
+            end_time = time.time()
+            status = 'success' if success and not errors else 'failed'
+            completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            self._update_execution_status(execution_id, status, output, errors, completed_at, end_time - start_time)
+
             return jsonify({
-                "success": True, 
+                "success": success and not errors,
                 "execution_id": execution_id,
-                "message": "Ansible execution started in background",
-                "status": "queued"
+                "status": status,
+                "output": output,
+                "errors": errors
             })
 
         # --- Enhanced Terraform endpoint with proper output handling ---
@@ -2077,19 +2106,24 @@ This directory contains {script_type} files and configurations.
             if machine_id == "localhost":
                 # Local Docker containers
                 try:
-                    import subprocess
-                    flag = "-a" if all_containers else ""
-                    cmd = ["docker", "ps"] + (["-a"] if all_containers else []) + [
-                        "--format", "table {{.ID}}\t{{.Image}}\t{{.Command}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}"
-                    ]
+                    import subprocess, json
+                    cmd = ["docker", "ps"] + (["-a"] if all_containers else []) + ["--format", "{{json .}}"]
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-                    
                     if result.returncode != 0:
-                        return jsonify({"success": False, "error": "Failed to list Docker containers"})
-                    
+                        return jsonify({"success": False, "error": "Failed to list Docker containers", "output": result.stdout, "errors": result.stderr})
+                    containers = []
+                    for line in result.stdout.strip().split('\n'):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            containers.append(json.loads(line))
+                        except Exception:
+                            pass
                     return jsonify({
                         "success": True,
                         "output": result.stdout.strip(),
+                        "containers": containers,
                         "errors": result.stderr
                     })
                 except Exception as e:
@@ -3598,6 +3632,10 @@ This directory contains {script_type} files and configurations.
             data = request.json
             machine_id = data.get('machine_id')
             force_refresh = data.get('force_refresh', False)
+
+            # Normalize local alias
+            if machine_id == 'local':
+                machine_id = 'localhost'
             
             if not machine_id:
                 return jsonify({'success': False, 'error': 'Machine ID is required'}), 400
