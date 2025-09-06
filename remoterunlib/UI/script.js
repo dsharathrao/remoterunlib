@@ -117,6 +117,29 @@ class RemoteRunApp {
             clearDockerBtn.addEventListener('click', () => this.clearDocker());
         }
 
+        // SSH Key upload handlers (deferred to ensure modal elements exist)
+        setTimeout(() => {
+            const uploadBtn = document.getElementById('upload-key-btn');
+            const fileInput = document.getElementById('machine-key-file');
+            const clearBtn = document.getElementById('clear-key-btn');
+            if (uploadBtn && fileInput) {
+                uploadBtn.addEventListener('click', () => fileInput.click());
+                fileInput.addEventListener('change', (e) => {
+                    const file = e.target.files?.[0];
+                    if (file) this.uploadSSHKeyFile(file);
+                });
+            }
+            if (clearBtn) {
+                clearBtn.addEventListener('click', () => {
+                    const keyInput = document.getElementById('machine-key');
+                    if (keyInput) keyInput.value = '';
+                    if (fileInput) fileInput.value = '';
+                    clearBtn.style.display = 'none';
+                    this.addLog('Cleared uploaded SSH key reference', 'info');
+                });
+            }
+        }, 400);
+
         // Add event listeners for new tab-specific buttons
         // Python Upload and Editor buttons
         const runPythonUploadBtn = document.getElementById('run-python-upload-btn');
@@ -138,6 +161,9 @@ class RemoteRunApp {
         if (clearPythonEditorBtn) {
             clearPythonEditorBtn.addEventListener('click', () => this.clearPython());
         }
+
+        // Generic Editor New / Close buttons
+        this.bindEditorFileControls();
 
         // Ansible Upload and Editor buttons
         const runAnsibleUploadBtn = document.getElementById('run-ansible-upload-btn');
@@ -177,43 +203,19 @@ class RemoteRunApp {
             clearAnsibleAdhocBtn.addEventListener('click', () => this.clearAnsible());
         }
 
-        // Terraform Upload buttons
+        // Simplified Terraform: unified Execute Project button within directory view handles all workflows
+
+        // (Legacy upload Run button kept for compatibility but will route through unified handler if present)
         const runTerraformUploadBtn = document.getElementById('run-terraform-upload-btn');
         if (runTerraformUploadBtn) {
-            runTerraformUploadBtn.addEventListener('click', () => this.runTerraform('plan'));
+            runTerraformUploadBtn.addEventListener('click', () => this.executeTerraformWorkflowFromEditor?.('plan'));
         }
-
         const clearTerraformUploadBtn = document.getElementById('clear-terraform-upload-btn');
         if (clearTerraformUploadBtn) {
-            clearTerraformUploadBtn.addEventListener('click', () => this.clearTerraform());
+            clearTerraformUploadBtn.addEventListener('click', () => this.clearTerraform?.());
         }
 
-        // Add event listeners for Terraform action buttons
-        const terraformInitBtn = document.getElementById('terraform-init-btn');
-        if (terraformInitBtn) {
-            terraformInitBtn.addEventListener('click', () => this.runTerraform('init'));
-        }
-
-        const terraformPlanBtn = document.getElementById('terraform-plan-btn');
-        if (terraformPlanBtn) {
-            terraformPlanBtn.addEventListener('click', () => this.runTerraform('plan'));
-        }
-
-        const terraformApplyBtn = document.getElementById('terraform-apply-btn');
-        if (terraformApplyBtn) {
-            terraformApplyBtn.addEventListener('click', () => this.runTerraform('apply'));
-        }
-
-        // Fix: Add event listeners for Ansible mode toggle buttons
-        document.querySelectorAll('.mode-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-                e.currentTarget.classList.add('active');
-                document.querySelectorAll('.mode-content').forEach(content => content.classList.remove('active'));
-                const mode = e.currentTarget.dataset.mode;
-                document.getElementById(`${mode}-mode`).classList.add('active');
-            });
-        });
+        // Fix: Add event listeners for Ansible mode toggle buttons (removed - using direct tab switching now)
 
         // Load existing files on startup
         this.loadExistingFiles('python');
@@ -277,6 +279,53 @@ class RemoteRunApp {
     }
 
     // === UTILITY METHODS ===
+    bindEditorFileControls() {
+        // Mapping of editors
+        const editors = [
+            {
+                type: 'python', ext: '.py', editorId: 'python-editor', nameId: 'python-tab-name', filenameInput: 'python-filename', newBtn: 'python-new-file-btn', closeBtn: 'python-close-file-btn', placeholder: '# New Python script...\n', defaultName: 'script.py'
+            },
+            {
+                type: 'ansible', ext: '.yml', editorId: 'ansible-editor', nameId: 'ansible-tab-name', filenameInput: 'ansible-filename', newBtn: 'ansible-new-file-btn', closeBtn: 'ansible-close-file-btn', placeholder: '# New Ansible playbook...\n---\n- hosts: all\n  tasks:\n    - debug: msg="Hello"\n', defaultName: 'playbook.yml'
+            },
+            {
+                type: 'terraform', ext: '.tf', editorId: 'terraform-editor', nameId: 'terraform-tab-name', filenameInput: 'terraform-filename', newBtn: 'terraform-new-file-btn', closeBtn: 'terraform-close-file-btn', placeholder: '# New Terraform config...\n', defaultName: 'main.tf'
+            },
+            {
+                type: 'docker', ext: '.yml', editorId: 'docker-editor', nameId: 'docker-tab-name', filenameInput: 'docker-filename', newBtn: 'docker-new-file-btn', closeBtn: 'docker-close-file-btn', placeholder: '# New Docker compose or Dockerfile content...\n', defaultName: 'docker-compose.yml'
+            }
+        ];
+
+        editors.forEach(cfg => {
+            const newBtn = document.getElementById(cfg.newBtn);
+            if (newBtn && !newBtn._bound) {
+                newBtn.addEventListener('click', () => {
+                    const name = prompt(`Enter new ${cfg.type} file name:`, cfg.defaultName);
+                    if (!name) return;
+                    document.getElementById(cfg.editorId).value = cfg.placeholder;
+                    const tabName = document.getElementById(cfg.nameId);
+                    if (tabName) tabName.textContent = name;
+                    const fnameInput = document.getElementById(cfg.filenameInput);
+                    if (fnameInput) fnameInput.value = name;
+                    this.addLog(`${cfg.type} new file ready: ${name}`, 'info');
+                });
+                newBtn._bound = true;
+            }
+            const closeBtn = document.getElementById(cfg.closeBtn);
+            if (closeBtn && !closeBtn._bound) {
+                closeBtn.addEventListener('click', () => {
+                    if (!confirm('Close current file (unsaved changes will be lost)?')) return;
+                    document.getElementById(cfg.editorId).value = '';
+                    const tabName = document.getElementById(cfg.nameId);
+                    if (tabName) tabName.textContent = cfg.defaultName;
+                    const fnameInput = document.getElementById(cfg.filenameInput);
+                    if (fnameInput) fnameInput.value = '';
+                    this.addLog(`${cfg.type} file closed`, 'info');
+                });
+                closeBtn._bound = true;
+            }
+        });
+    }
     escapeHtml(unsafe) {
         if (typeof unsafe !== 'string') {
             return String(unsafe || '');
@@ -384,6 +433,16 @@ class RemoteRunApp {
             });
         }
 
+        const dockerMachineSelect = document.getElementById('docker-machine-select');
+        if (dockerMachineSelect) {
+            dockerMachineSelect.addEventListener('change', () => {
+                const overviewTab = document.querySelector('#docker-section .tab-btn[data-tab="overview-docker"]');
+                if (overviewTab && overviewTab.classList.contains('active')) {
+                    this.refreshDockerInfo();
+                }
+            });
+        }
+
         // Tab switching handlers for overview auto-load
         document.addEventListener('click', (e) => {
             if (e.target.classList.contains('tab-btn')) {
@@ -395,6 +454,8 @@ class RemoteRunApp {
                     setTimeout(() => this.refreshAnsibleOverview(), 100);
                 } else if (tabName === 'overview-terraform') {
                     setTimeout(() => this.refreshTerraformOverview(), 100);
+                } else if (tabName === 'overview-docker') {
+                    setTimeout(() => this.refreshDockerInfo(), 100);
                 }
             }
         });
@@ -875,25 +936,78 @@ class RemoteRunApp {
     }
 
     startPingInterval() {
-        // Ping all machines every 5 minutes
+        // Set up background ping every 3 minutes (no immediate ping; first run occurs after initial sequential check)
         if (this.pingInterval) clearInterval(this.pingInterval);
         this.pingInterval = setInterval(() => {
             this.pingAllMachines();
-        }, 5 * 60000); // 300,000 ms = 5 minutes
+        }, 3 * 60000); // 180,000 ms = 3 minutes
 
-        // Refresh dashboard stats every 10 seconds when on dashboard
+        // Refresh dashboard stats every 10 seconds when on dashboard (unchanged)
         if (this.dashboardStatsInterval) clearInterval(this.dashboardStatsInterval);
         this.dashboardStatsInterval = setInterval(() => {
             if (this.currentSection === 'dashboard') {
                 this.loadDashboardStats();
             }
         }, 10000); // 10 seconds
+
+        // Update machine status note every 2 minutes to show last refreshed time
+        if (this.machineStatusNoteInterval) clearInterval(this.machineStatusNoteInterval);
+        this.updateMachineStatusNote(); // initial
+        this.machineStatusNoteInterval = setInterval(() => {
+            this.updateMachineStatusNote();
+        }, 2 * 60000); // 120,000 ms = 2 minutes
+    }
+
+    updateMachineStatusNote() {
+        const note = document.getElementById('machine-status-refresh-note');
+        if (!note) return;
+        if (!this._lastPingTimestamp) {
+            note.innerHTML = `<i class="fas fa-broadcast-tower"></i> Machine connectivity will be tested on first visit. Initial connectivity check pending...`;
+            return;
+        }
+        const last = new Date(this._lastPingTimestamp);
+        const next = new Date(this._lastPingTimestamp + 3 * 60000);
+        // If next check crosses to a different calendar day, include the date for clarity
+        let nextDisplay = next.toLocaleTimeString();
+        if (next.toDateString() !== last.toDateString()) {
+            nextDisplay = `${next.toLocaleDateString()} ${nextDisplay}`;
+        }
+        note.innerHTML = `<i class="fas fa-broadcast-tower"></i> Machine connectivity auto-tested every <strong>3 min</strong>. Last check: <strong>${last.toLocaleTimeString()}</strong>. Next automatic check at <strong>${nextDisplay}</strong>.`;
+    }
+
+    timeUntilNextPing() {
+        // Rough seconds until next ping (if interval set)
+        if (!this.pingInterval) return 0;
+        // Not tracking exact elapsed; provide approximate 180s window countdown using timestamp
+        if (!this._lastPingTimestamp) return 180;
+        const elapsed = Math.floor((Date.now() - this._lastPingTimestamp) / 1000);
+        return Math.max(0, 180 - elapsed);
     }
 
     async pingAllMachines() {
+        this._lastPingTimestamp = Date.now();
         for (const machine of this.machines) {
             this.pingMachine(machine.id);
         }
+        // Update note after batch ping
+        this.updateMachineStatusNote();
+    }
+
+    /**
+     * Perform the initial sequential connectivity test (one-by-one) on first visit to Machines section
+     */
+    async initialSequentialPing() {
+        if (this._machinesFirstVisitDone) return;
+        if (!this.machines || !this.machines.length) return; // nothing to do yet
+        this._machinesFirstVisitDone = true;
+        // Sequentially test each machine so user can see progressive updates
+        for (const machine of this.machines) {
+            try {
+                await this.pingMachine(machine.id);
+            } catch (e) { /* ignore individual failures; status handled in pingMachine */ }
+        }
+        this._lastPingTimestamp = Date.now();
+        this.updateMachineStatusNote();
     }
 
     async pingMachine(machineId) {
@@ -1109,6 +1223,33 @@ class RemoteRunApp {
         // Add log entry
         this.addLog(`🚀 ${type.toUpperCase()} execution started: ${command}`, 'info');
 
+        // Activity indicator integration for long-running background executions
+        try {
+            if (typeof this._incrementActivity === 'function') {
+                if (!this.activityExecutionMap) this.activityExecutionMap = {};
+                // Derive category and title
+                const categoryMap = {
+                    command: 'command',
+                    python: 'python',
+                    ansible: 'ansible',
+                    terraform: 'terraform',
+                    docker: 'docker'
+                };
+                const category = categoryMap[type] || 'generic';
+                const shortCmd = (command || '').length > 60 ? command.slice(0, 57) + '…' : (command || 'Running');
+                const title = `${type.toUpperCase()} – ${shortCmd}`;
+                const opId = this._incrementActivity(category, { title });
+                // Enrich activity operation with extra metadata
+                const op = this._activity && this._activity.operations && this._activity.operations[opId];
+                if (op) {
+                    op.execution_id = execution_id;
+                    op.command = command;
+                    op.machine_id = machine_id;
+                }
+                this.activityExecutionMap[execution_id] = opId;
+            }
+        } catch (e) { /* non-fatal */ }
+
         // Auto-popup logs panel for new executions
         this.autoShowLogs();
 
@@ -1148,6 +1289,14 @@ class RemoteRunApp {
 
                 // Remove from running executions
                 this.runningExecutions.delete(execution_id);
+
+                // Complete corresponding activity indicator entry
+                if (this.activityExecutionMap && this.activityExecutionMap[execution_id] && typeof this._decrementActivity === 'function') {
+                    const opId = this.activityExecutionMap[execution_id];
+                    const successFlag = status === 'success';
+                    this._decrementActivity(opId, successFlag);
+                    delete this.activityExecutionMap[execution_id];
+                }
             }
 
             // Update displays
@@ -1595,6 +1744,9 @@ class RemoteRunApp {
 
             // Load OS information for all machines (only once per session)
             this.loadAllMachineOSInfo();
+
+            // Kick off initial sequential connectivity test only once
+            this.initialSequentialPing();
         }
 
         // Load existing files when switching to script sections
@@ -1604,6 +1756,17 @@ class RemoteRunApp {
             this.loadExistingFiles('ansible');
         } else if (section === 'terraform') {
             this.loadExistingFiles('terraform');
+        } else if (section === 'docker') {
+            // Auto refresh docker overview & containers when entering section if machine selected
+            const m = document.getElementById('docker-machine-select')?.value;
+            if (m) {
+                // Kick off parallel refreshes (non-blocking)
+                this.refreshDockerInfo?.();
+                this.refreshDockerImages?.();
+                this.refreshDockerContainers?.();
+                this.refreshDockerVolumes?.();
+                this.refreshDockerNetworks?.();
+            }
         }
 
         this.currentSection = section;
@@ -1625,6 +1788,10 @@ class RemoteRunApp {
                 this.machines = await response.json();
                 this.renderMachines();
                 this.populateMachineSelects();
+                // If user is currently viewing machines and first visit ping not done, trigger it now
+                if (this.currentSection === 'machines') {
+                    this.initialSequentialPing();
+                }
             }
         } catch (error) {
             this.addLog('Failed to load machines', 'error');
@@ -1782,7 +1949,7 @@ class RemoteRunApp {
             // Add Local/Localhost option for Terraform and Docker
             if (selectId === 'terraform-machine-select') {
                 const localOption = document.createElement('option');
-                localOption.value = 'local';
+                localOption.value = 'localhost';
                 localOption.textContent = 'Local (Dashboard Host)';
                 select.appendChild(localOption);
             } else if (selectId === 'docker-machine-select') {
@@ -1800,9 +1967,9 @@ class RemoteRunApp {
             });
 
             // Restore previous selection if the machine still exists or is 'local'/'localhost'
-            if (selectId === 'terraform-machine-select' && (!prevValue || prevValue === 'local')) {
-                // Default to Local for Terraform
-                select.value = 'local';
+            if (selectId === 'terraform-machine-select' && (!prevValue || prevValue === 'local' || prevValue === 'localhost')) {
+                // Default to Local/localhost for Terraform
+                select.value = 'localhost';
             } else if (selectId === 'docker-machine-select' && prevValue === 'localhost') {
                 // Only restore localhost for Docker if it was previously selected
                 select.value = 'localhost';
@@ -1811,7 +1978,7 @@ class RemoteRunApp {
             } else {
                 // Set to default based on type
                 if (selectId === 'terraform-machine-select') {
-                    select.value = 'local';
+                    select.value = 'localhost';
                 } else if (selectId === 'docker-machine-select') {
                     // Keep default "Choose a machine..." option for Docker
                     select.value = '';
@@ -1820,7 +1987,50 @@ class RemoteRunApp {
                 }
             }
         });
-    } async saveMachine() {
+
+        // Trigger initial overviews if already selected
+        const tfSelect = document.getElementById('terraform-machine-select');
+        if (tfSelect && tfSelect.value === 'localhost') {
+            this.refreshTerraformOverview();
+        }
+        const dkSelect = document.getElementById('docker-machine-select');
+        if (dkSelect && dkSelect.value === 'localhost') {
+            this.refreshDockerInfo();
+        }
+    }
+
+    /**
+     * Initialize Add Machine modal controls (cancel button)
+     */
+    initAddMachineModal() {
+        const cancelBtn = document.getElementById('cancel-machine-btn');
+        if (cancelBtn && !cancelBtn._bound) {
+            cancelBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                // Reset form fields
+                const form = document.getElementById('add-machine-form');
+                if (form) form.reset();
+                // Clear id & key path
+                const idEl = document.getElementById('machine-id');
+                if (idEl) idEl.value = '';
+                const keyEl = document.getElementById('machine-key');
+                if (keyEl) keyEl.value = '';
+                const clearKeyBtn = document.getElementById('clear-key-btn');
+                if (clearKeyBtn) clearKeyBtn.style.display = 'none';
+                // Reset auth selection to password and hide key group
+                const authSelect = document.getElementById('machine-auth-type');
+                const keyGroup = document.getElementById('key-group');
+                const passwordGroup = document.getElementById('password-group');
+                if (authSelect) authSelect.value = 'password';
+                if (keyGroup) keyGroup.classList.add('hidden');
+                if (passwordGroup) passwordGroup.classList.remove('hidden');
+                this.hideModal('add-machine-modal');
+            });
+            cancelBtn._bound = true;
+        }
+    }
+
+    async saveMachine() {
         const formData = {
             id: document.getElementById('machine-id').value,
             name: document.getElementById('machine-name').value,
@@ -1849,7 +2059,8 @@ class RemoteRunApp {
             }
         }
 
-        this.showLoading();
+        // Show generic loading for machine save (previously referenced undefined 'mode')
+        this.showLoading('generic', formData.id ? 'Updating Machine' : 'Adding Machine');
 
         try {
             const method = formData.id ? 'PUT' : 'POST';
@@ -1913,7 +2124,7 @@ class RemoteRunApp {
             alert('No machine selected for connection test');
             return;
         }
-        this.showLoading();
+        this.showLoading('generic', 'Testing Connection');
         try {
             const response = await fetch('/api/test-connection', {
                 method: 'POST',
@@ -1953,6 +2164,33 @@ class RemoteRunApp {
             passwordGroup.classList.add('hidden');
             keyGroup.classList.remove('hidden');
         }
+    }
+
+    async uploadSSHKeyFile(file) {
+        if (!file) return null;
+        try {
+            const formData = new FormData();
+            formData.append('key_file', file);
+            this.showLoading('generic', 'Uploading SSH key');
+            const res = await fetch('/api/upload-key', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                document.getElementById('machine-key').value = data.path;
+                this.addLog('SSH key uploaded and stored securely', 'success');
+                const clearBtn = document.getElementById('clear-key-btn');
+                if (clearBtn) clearBtn.style.display = 'inline-flex';
+                return data.path;
+            } else {
+                this.addLog('SSH key upload failed: ' + (data.error || 'Unknown error'), 'error');
+                alert('Key upload failed: ' + (data.error || 'Unknown error'));
+            }
+        } catch (e) {
+            this.addLog('SSH key upload exception: ' + e.message, 'error');
+            alert('SSH key upload error: ' + e.message);
+        } finally {
+            this.hideLoading();
+        }
+        return null;
     }
 
     async executeCommand() {
@@ -2194,18 +2432,6 @@ class RemoteRunApp {
         }
     }
 
-    switchAnsibleMode(mode) {
-        document.querySelectorAll('.mode-btn').forEach(btn => {
-            btn.classList.remove('active');
-        });
-        document.querySelector(`[data-mode="${mode}"]`).classList.add('active');
-
-        document.querySelectorAll('.mode-content').forEach(content => {
-            content.classList.remove('active');
-        });
-        document.getElementById(`${mode}-mode`).classList.add('active');
-    }
-
     async runAnsible() {
         const machineId = document.getElementById('ansible-machine-select').value;
 
@@ -2214,10 +2440,12 @@ class RemoteRunApp {
             return;
         }
 
-        const activeMode = document.querySelector('.mode-btn.active').dataset.mode;
-        let payload = { machine_id: machineId, mode: activeMode };
+        // Determine mode based on active main tab instead of mode buttons
+        const activeMainTab = document.querySelector('#ansible-section .tab-btn.active').dataset.tab;
+        const mode = activeMainTab === 'adhoc-ansible' ? 'adhoc' : 'playbook';
+        let payload = { machine_id: machineId, mode: mode };
 
-        if (activeMode === 'adhoc') {
+        if (mode === 'adhoc') {
             payload.module = document.getElementById('ansible-module').value;
             payload.args = document.getElementById('ansible-args').value;
             payload.become = document.getElementById('ansible-adhoc-become').checked;
@@ -2238,9 +2466,8 @@ class RemoteRunApp {
             }
         }
 
-        this.startExecution(`ansible-${activeMode}`);
-        this.showLoading();
-
+        this.startExecution(`ansible-${mode}`);
+        this.showLoading('ansible', mode === 'adhoc' ? 'Running Ansible Ad-hoc' : 'Running Ansible Playbook');
         try {
             const response = await fetch('/api/run-ansible', {
                 method: 'POST',
@@ -2253,22 +2480,19 @@ class RemoteRunApp {
             const result = await response.json();
 
             if (result.success) {
-                this.addLog(`Ansible ${activeMode} executed successfully`, 'success');
-                // Pretty print output if it's an object
-                if (typeof result.output === 'object') {
-                    this.addLog({ Output: result.output }, 'info');
-                } else {
-                    this.addLog(`Output: ${result.output}`, 'info');
+                this.addLog(`Ansible ${mode} finished with status: ${result.status}`, 'success');
+                if (result.output) {
+                    const formatted = typeof result.output === 'string' ? result.output : JSON.stringify(result.output, null, 2);
+                    this.addLog(`Output:\n${formatted}`, 'info');
                 }
-                this.endExecution(true);
+                if (result.errors) {
+                    this.addLog(`Errors:\n${result.errors}`, 'error');
+                }
+                this.endExecution(!result.errors);
             } else {
-                // Show error details if present
-                if (typeof result.output === 'object') {
-                    this.addLog({ Error: result.output }, 'error');
-                } else {
-                    this.addLog(`Ansible ${activeMode} failed: ${result.message || 'Unknown error'}`, 'error');
-                }
-                alert('Failed to run Ansible: ' + (result.message || 'Unknown error'));
+                const errMsg = result.errors || result.message || 'Unknown error';
+                this.addLog(`Ansible ${mode} failed: ${errMsg}`, 'error');
+                alert('Failed to run Ansible: ' + errMsg);
                 this.endExecution(false);
             }
         } catch (error) {
@@ -2281,7 +2505,11 @@ class RemoteRunApp {
     }
 
     async runTerraform(action) {
-        const machineId = document.getElementById('terraform-machine-select').value;
+        let machineId = document.getElementById('terraform-machine-select').value;
+        if (machineId === 'local') {
+            machineId = 'localhost';
+            document.getElementById('terraform-machine-select').value = 'localhost';
+        }
 
         if (!machineId) {
             alert('Please select a machine (used for tracking purposes - Terraform runs locally)');
@@ -2298,11 +2526,10 @@ class RemoteRunApp {
         }
 
         this.startExecution(`terraform-${action}`);
-        this.showLoading();
-
+        this.showLoading('terraform', `Terraform ${action} in progress`);
         try {
             const payload = {
-                machine_id: machineId,
+                machine_id: machineId || 'localhost',
                 action: action,
                 filename: filename
             };
@@ -3002,11 +3229,25 @@ class RemoteRunApp {
     }
 
     showLoading() {
-        document.getElementById('loading-overlay').classList.add('show');
+        // Deprecated full-screen overlay hidden in favor of compact indicator
+        // Support optional arguments: (category, title)
+        const category = arguments[0] && typeof arguments[0] === 'string' ? arguments[0] : 'generic';
+        const title = arguments[1] && typeof arguments[1] === 'string' ? arguments[1] : 'Processing';
+        if (!this._activityStack) this._activityStack = [];
+        if (typeof this._incrementActivity === 'function') {
+            const opId = this._incrementActivity(category, { title });
+            this._activityStack.push(opId);
+        }
     }
 
     hideLoading() {
-        document.getElementById('loading-overlay').classList.remove('show');
+        const success = arguments.length ? !!arguments[0] : true;
+        if (this._activityStack && this._activityStack.length && typeof this._decrementActivity === 'function') {
+            const opId = this._activityStack.pop();
+            this._decrementActivity(opId, success);
+        } else if (typeof this._decrementActivity === 'function') {
+            this._decrementActivity(undefined, success);
+        }
     }
 
     // Machine-specific actions
@@ -3166,9 +3407,9 @@ class RemoteRunApp {
     }
 
     async saveAnsible() {
-        const activeMode = document.querySelector('.mode-btn.active').dataset.mode;
-
-        if (activeMode === 'adhoc') {
+        // Determine mode based on active main tab instead of mode buttons
+        const activeMainTab = document.querySelector('#ansible-section .tab-btn.active').dataset.tab;
+        const mode = activeMainTab === 'adhoc-ansible' ? 'adhoc' : 'playbook'; if (mode === 'adhoc') {
             const module = document.getElementById('ansible-module').value;
             const args = document.getElementById('ansible-args').value;
 
@@ -3338,22 +3579,7 @@ class RemoteRunApp {
         }
 
         // Terraform-specific directory action buttons
-        if (type === 'terraform') {
-            const initBtn = document.getElementById('terraform-dir-init-btn');
-            if (initBtn) {
-                initBtn.addEventListener('click', () => this.executeTerraformDirectoryAction('init'));
-            }
-
-            const planBtn = document.getElementById('terraform-dir-plan-btn');
-            if (planBtn) {
-                planBtn.addEventListener('click', () => this.executeTerraformDirectoryAction('plan'));
-            }
-
-            const applyBtn = document.getElementById('terraform-dir-apply-btn');
-            if (applyBtn) {
-                applyBtn.addEventListener('click', () => this.executeTerraformDirectoryAction('apply'));
-            }
-        }
+        // Terraform directory specific buttons removed (Init/Plan/Apply). Unified workflow used instead.
 
         // Enter key for directory name input
         const dirNameInput = document.getElementById(`${type}-new-dir-name`);
@@ -4199,52 +4425,7 @@ class RemoteRunApp {
         this.addLog(`📋 All ${filesToExecute.length} file(s) submitted for execution. Check Dashboard for progress.`, 'info');
     }
 
-    async executeTerraformDirectoryAction(action) {
-        const dirName = this.currentDirectories['terraform'];
-
-        if (!dirName) {
-            alert('No terraform directory selected');
-            return;
-        }
-
-        this.showLoading();
-        this.addLog(`Running terraform ${action} in directory: ${dirName}...`, 'info');
-
-        try {
-            const response = await fetch('/api/run-terraform', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    action: action,
-                    machine_id: 'local',  // Always use local for terraform
-                    filename: '',  // No specific file, works on directory
-                    script_content: '',  // No content, uses directory
-                    directory_name: dirName  // Pass the directory name
-                })
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-                this.addLog(`Terraform ${action} completed successfully`, 'success');
-                this.addLog(`Output: ${result.output}`, 'info');
-
-                // Refresh dashboard stats and history
-                this.loadDashboardStats();
-                this.loadDashboardHistory();
-            } else {
-                this.addLog(`Terraform ${action} failed: ${result.message}`, 'error');
-                alert(`Terraform ${action} failed: ${result.message}`);
-            }
-        } catch (error) {
-            this.addLog(`Error running terraform ${action}: ${error.message}`, 'error');
-            alert(`Failed to run terraform ${action}`);
-        } finally {
-            this.hideLoading();
-        }
-    }
+    // Removed executeTerraformDirectoryAction in favor of unified workflow execution
 
     // --- Enhanced Project Execution Methods ---
     async executeProject(projectType) {
@@ -4278,13 +4459,10 @@ class RemoteRunApp {
         let remote = true;
 
         if (projectType === 'python') {
-            const location = document.querySelector('input[name="python-exec-location"]:checked').value;
-            remote = location === 'remote';
-
-            if (!remote) {
-                // For local execution, we don't need a machine
-            } else if (!machineId) {
-                alert('Please select a machine for remote execution');
+            // Execution always targets the selected machine now (remote). Require machine selection.
+            remote = true;
+            if (!machineId) {
+                alert('Please select a machine for execution');
                 return;
             }
         } else if (projectType === 'ansible') {
@@ -4554,19 +4732,31 @@ class RemoteRunApp {
             dockerMachineSelect.addEventListener('change', () => {
                 this.onDockerMachineChange();
             });
+        } else {
+            console.warn('Docker machine select not found at setup time');
         }
 
         // Tab switching for Docker
-        document.querySelectorAll('#docker-section .tab-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                this.switchDockerTab(btn.dataset.tab);
-            });
-        });
+        const dockerTabButtons = document.querySelectorAll('#docker-section .tab-btn');
+        if (dockerTabButtons && dockerTabButtons.length) {
+            dockerTabButtons.forEach(btn => btn.addEventListener('click', () => this.switchDockerTab(btn.dataset.tab)));
+        } else {
+            console.warn('Docker tab buttons not found');
+        }
 
         // Refresh buttons
         const refreshDockerInfoBtn = document.getElementById('refresh-docker-info-btn');
         if (refreshDockerInfoBtn) {
             refreshDockerInfoBtn.addEventListener('click', () => this.refreshDockerInfo());
+        }
+
+        // If overview container exists and a machine already selected, auto refresh
+        const dockerInfoContent = document.getElementById('docker-info-content');
+        if (dockerInfoContent) {
+            const mid = dockerMachineSelect ? dockerMachineSelect.value : '';
+            if (mid) {
+                setTimeout(() => this.refreshDockerInfo(), 50);
+            }
         }
 
         const refreshImagesBtn = document.getElementById('refresh-images-btn');
@@ -4773,7 +4963,11 @@ class RemoteRunApp {
     }
 
     async refreshDockerInfo() {
-        const machineId = document.getElementById('docker-machine-select').value;
+        let machineId = document.getElementById('docker-machine-select').value;
+        if (machineId === 'local') {
+            machineId = 'localhost';
+            document.getElementById('docker-machine-select').value = 'localhost';
+        }
         if (!machineId) return;
 
         try {
@@ -4799,7 +4993,19 @@ class RemoteRunApp {
 
                 // Create professional Docker info display
                 const infoContent = document.getElementById('docker-info-content');
-                infoContent.innerHTML = this.buildDockerInfoDisplay(result.version, sysInfo);
+                if (!infoContent) {
+                    console.warn('docker-info-content missing, injecting minimal container');
+                    const overviewTab = document.getElementById('overview-docker-tab');
+                    if (overviewTab) {
+                        const fallbackDiv = document.createElement('div');
+                        fallbackDiv.id = 'docker-info-content';
+                        overviewTab.appendChild(fallbackDiv);
+                    }
+                }
+                const target = document.getElementById('docker-info-content');
+                if (target) {
+                    target.innerHTML = this.buildDockerInfoDisplay(result.version, sysInfo);
+                }
 
                 // Update quick stats cards
                 this.updateDockerQuickStats(sysInfo);
@@ -5103,18 +5309,47 @@ class RemoteRunApp {
             const result = await response.json();
 
             if (result.success) {
-                this.populateContainersTable(result.output);
+                // Prefer structured containers array if provided by backend
+                if (Array.isArray(result.containers) && result.containers.length > 0) {
+                    this.populateContainersFromObjects(result.containers);
 
-                // Update containers count in quick stats
-                const lines = result.output.split('\n').filter(line => line.trim() && !line.startsWith('CONTAINER'));
-                document.getElementById('docker-containers-count').textContent = lines.length;
+                    // Update counts using structured data
+                    document.getElementById('docker-containers-count').textContent = result.containers.length;
+                    const running = result.containers.filter(c => c.Status && c.Status.startsWith('Up'));
+                    document.getElementById('docker-running-count').textContent = running.length;
 
-                // Count running containers
-                const runningLines = lines.filter(line => line.includes('Up '));
-                document.getElementById('docker-running-count').textContent = runningLines.length;
+                    // Populate selection inputs
+                    this.populateContainerIdsFromObjects(result.containers);
+                } else {
+                    // Fallback to legacy plain-text output parsing
+                    // Try to detect JSON lines in output (backend older than structured array change)
+                    const raw = result.output || '';
+                    const jsonLikeLines = raw.split('\n').map(l => l.trim()).filter(l => l.startsWith('{') && l.endsWith('}'));
+                    if (jsonLikeLines.length > 0) {
+                        const parsed = [];
+                        jsonLikeLines.forEach(l => { try { parsed.push(JSON.parse(l)); } catch (e) { } });
+                        if (parsed.length > 0) {
+                            this.addLog(`Parsed ${parsed.length} containers from JSON lines fallback`, 'info');
+                            this.populateContainersFromObjects(parsed);
+                            document.getElementById('docker-containers-count').textContent = parsed.length;
+                            const running = parsed.filter(c => c.Status && c.Status.startsWith('Up'));
+                            document.getElementById('docker-running-count').textContent = running.length;
+                            this.populateContainerIdsFromObjects(parsed);
+                            return;
+                        }
+                    }
 
-                // Auto-populate container IDs in action forms
-                this.populateContainerIds(lines);
+                    this.populateContainersTable(raw);
+
+                    const lines = raw.split('\n').filter(line => line.trim() && !line.startsWith('CONTAINER'));
+                    document.getElementById('docker-containers-count').textContent = lines.length;
+                    const runningLines = lines.filter(line => line.includes('Up '));
+                    document.getElementById('docker-running-count').textContent = runningLines.length;
+                    this.populateContainerIds(lines);
+                    if (!lines.length) {
+                        this.addLog('No containers parsed from fallback output. Enable JSON format backend or ensure containers exist.', 'warning');
+                    }
+                }
             } else {
                 this.showDockerMessage('docker-containers', `Error: ${result.error}`);
             }
@@ -5137,11 +5372,18 @@ class RemoteRunApp {
             return;
         }
 
-        const lines = output.split('\n').filter(line => line.trim());
+        let lines = output.split('\n').filter(line => line.trim());
+        // Detect placeholder format issue (literal {.ID}) and sanitize
+        const placeholderDetected = lines.some(l => l.includes('{.ID}') || l.includes('{.Names}'));
+        if (placeholderDetected) {
+            // Remove any non-header placeholder lines to avoid polluting UI
+            lines = lines.filter(l => !l.startsWith('{.ID}') && !l.startsWith('{.Names}'));
+            this.addLog('⚠️ Detected unexpanded Docker format placeholders ({.ID}). Backend likely running old code. Restart backend to fully resolve.', 'warning');
+        }
         if (lines.length <= 1) {
             table.style.display = 'none';
             message.style.display = 'block';
-            message.textContent = 'No containers found';
+            message.textContent = placeholderDetected ? 'Container list unavailable (format placeholders). Restart service.' : 'No containers found';
             return;
         }
 
@@ -5200,6 +5442,119 @@ class RemoteRunApp {
 
         table.style.display = 'table';
         message.style.display = 'none';
+    }
+
+    // New: populate containers table from structured objects returned by backend (docker ps --format '{{json .}}')
+    populateContainersFromObjects(containers) {
+        const table = document.getElementById('docker-containers-table');
+        const tbody = document.getElementById('docker-containers-tbody');
+        const message = document.getElementById('docker-containers-message');
+
+        if (!Array.isArray(containers) || containers.length === 0) {
+            table.style.display = 'none';
+            message.style.display = 'block';
+            message.textContent = 'No containers found';
+            return;
+        }
+
+        tbody.innerHTML = '';
+
+        containers.forEach(c => {
+            // Defensive checks
+            if (!c || !c.ID) return;
+            const id = c.ID;
+            const image = c.Image || ''; // e.g., 'nginx:latest'
+            const command = (c.Command || '').replace(/^"|"$/g, '');
+            const created = c.RunningFor || c.CreatedAt || '';
+            const status = c.Status || '';
+            const ports = c.Ports || '';
+            const names = c.Names || '';
+
+            let statusClass = '';
+            let statusIcon = '';
+            if (status.startsWith('Up')) {
+                statusClass = 'status-running';
+                statusIcon = '<i class="fas fa-play-circle" style="color: #10b981; margin-right: 4px;"></i>';
+            } else if (status.startsWith('Exited')) {
+                statusClass = 'status-exited';
+                statusIcon = '<i class="fas fa-stop-circle" style="color: #ef4444; margin-right: 4px;"></i>';
+            } else if (status) {
+                statusClass = 'status-stopped';
+                statusIcon = '<i class="fas fa-pause-circle" style="color: #f59e0b; margin-right: 4px;"></i>';
+            }
+
+            const row = document.createElement('tr');
+            row.style.cursor = 'pointer';
+            row.title = `Click to manage container ${id} (${names})`;
+            row.addEventListener('click', () => this.showContainerActions(id));
+            row.innerHTML = `
+                <td class="container-id" title="Full ID: ${this.escapeHtml(id)}">${this.escapeHtml(id.substring(0, 12))}</td>
+                <td class="image-name">${this.escapeHtml(image)}</td>
+                <td>${this.escapeHtml(command)}</td>
+                <td>${this.escapeHtml(created)}</td>
+                <td class="${statusClass}">${statusIcon}${this.escapeHtml(status)}</td>
+                <td>${this.escapeHtml(ports)}</td>
+                <td>${this.escapeHtml(names)}</td>`;
+            tbody.appendChild(row);
+        });
+
+        table.style.display = 'table';
+        message.style.display = 'none';
+    }
+
+    // New: populate container selection inputs from structured objects
+    populateContainerIdsFromObjects(containers) {
+        if (!Array.isArray(containers)) return;
+        const simplified = containers.filter(c => c && c.ID).map(c => ({
+            id: c.ID,
+            name: c.Names || '',
+            display: `${c.ID.substring(0, 12)}${c.Names ? ' (' + c.Names + ')' : ''}`
+        }));
+
+        const execSelect = document.getElementById('exec-container-id');
+        const statsSelect = document.getElementById('stats-container-id');
+
+        if (execSelect) {
+            execSelect.innerHTML = '<option value="">Select a container...</option>';
+            simplified.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.display;
+                execSelect.appendChild(opt);
+            });
+        }
+        if (statsSelect) {
+            statsSelect.innerHTML = '<option value="">Select a container...</option>';
+            simplified.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.display;
+                statsSelect.appendChild(opt);
+            });
+        }
+
+        // Datalist for other inputs
+        const existing = document.getElementById('container-ids-datalist');
+        if (existing) existing.remove();
+        if (simplified.length > 0) {
+            const dl = document.createElement('datalist');
+            dl.id = 'container-ids-datalist';
+            simplified.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.display;
+                dl.appendChild(opt);
+            });
+            document.body.appendChild(dl);
+            const extraInputs = ['selected-container-id'];
+            extraInputs.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.setAttribute('list', 'container-ids-datalist');
+                    el.setAttribute('placeholder', 'Select or type container ID/name...');
+                }
+            });
+        }
     }
 
     async refreshDockerNetworks() {
@@ -5917,6 +6272,12 @@ class RemoteRunApp {
     populateContainerIds(containerLines) {
         // Extract container IDs and names from the output
         const containers = [];
+        // Filter out placeholder artifacts
+        const placeholder = containerLines.some(l => l.includes('{.ID}') || l.includes('{.Names}'));
+        if (placeholder) {
+            this.addLog('Skipping placeholder Docker entries ({.ID}) - restart backend to apply format fix.', 'warning');
+            containerLines = containerLines.filter(l => !l.includes('{.ID}') && !l.includes('{.Names}'));
+        }
         containerLines.forEach(line => {
             const parts = line.trim().split(/\s+/);
             if (parts.length >= 7) {
@@ -6721,7 +7082,12 @@ class RemoteRunApp {
     }
 
     async refreshTerraformOverview(forceRefresh = false) {
-        const machineId = document.getElementById('terraform-machine-select').value;
+        let machineId = document.getElementById('terraform-machine-select').value;
+        if (machineId === 'local') {
+            // Backward compatibility mapping
+            machineId = 'localhost';
+            document.getElementById('terraform-machine-select').value = 'localhost';
+        }
         if (!machineId) {
             this.resetTerraformOverview();
             return;
@@ -6754,8 +7120,18 @@ class RemoteRunApp {
     }
 
     displayTerraformOverview(overview) {
-        const container = document.getElementById('terraform-overview-content');
-        if (!container) return;
+        let container = document.getElementById('terraform-overview-content');
+        if (!container) {
+            const overviewTab = document.getElementById('overview-terraform-tab');
+            if (overviewTab) {
+                container = document.createElement('div');
+                container.id = 'terraform-overview-content';
+                overviewTab.appendChild(container);
+            } else {
+                console.warn('Terraform overview container not found');
+                return;
+            }
+        }
 
         const isInstalled = overview.terraform_version !== 'Not installed';
         const additionalTools = overview.additional_tools || {};
@@ -6927,6 +7303,77 @@ class RemoteRunApp {
 
 // Initialize the application
 const app = new RemoteRunApp();
+// Activity Indicator Enhancements
+(function () {
+    const indicator = document.getElementById('activity-indicator');
+    const popup = document.getElementById('activity-popup');
+    const closeBtn = document.getElementById('close-activity-popup');
+    if (!indicator) return;
+
+    // Extend app with activity tracking if not already
+    if (!app._activity) {
+        app._activity = { count: 0, operations: {} };
+        app._nextOpId = 1;
+        app._activityRoot = document.getElementById('activity-operations-list');
+        app._activityIndicator = indicator;
+        app._activityPopup = popup;
+        app._renderActivity = function () {
+            const count = Object.values(app._activity.operations).filter(o => !o.completed).length;
+            app._activity.count = count;
+            indicator.querySelector('.activity-count').textContent = count;
+            if (count > 0) { indicator.classList.add('active'); } else { indicator.classList.remove('active'); }
+            if (app._activityRoot) {
+                const ops = Object.values(app._activity.operations).sort((a, b) => b.started - a.started);
+                if (ops.length === 0) {
+                    app._activityRoot.innerHTML = '<div class="activity-empty">No active operations</div>';
+                } else {
+                    app._activityRoot.innerHTML = ops.map(op => {
+                        const cls = ['activity-item', op.type, op.completed ? (op.success ? 'completed' : 'failed') : ''].join(' ');
+                        const icon = op.icon || 'fa-spinner fa-spin';
+                        const status = op.completed ? (op.success ? 'done' : 'failed') : 'running';
+                        return `<div class="${cls}" data-id="${op.id}">\n <div class="activity-icon"><i class="fas ${icon}"></i></div>\n <div class="activity-details">\n   <div class="activity-title">${op.title}<span class="activity-status-badge">${status}</span></div>\n   <div class="activity-meta"><span>${op.category}</span><span>${op.started.toLocaleTimeString()}</span></div>\n   ${op.completed ? '' : '<div class="activity-progress-bar-wrapper"><div class="activity-progress-bar"></div></div>'}\n </div>\n</div>`;
+                    }).join('');
+                }
+            }
+        };
+        app._incrementActivity = function (category, meta) {
+            const id = app._nextOpId++;
+            const map = { command: 'terminal', python: 'python', ansible: 'cogs', terraform: 'cloud', docker: 'docker' };
+            const icon = 'fa-' + (map[category] || 'spinner fa-spin');
+            app._activity.operations[id] = { id, category: category || 'generic', title: meta?.title || 'Processing', type: category || 'generic', icon, started: new Date(), completed: false, success: false };
+            app._renderActivity();
+            return id;
+        };
+        app._decrementActivity = function (id, success = true) {
+            if (id) {
+                const op = app._activity.operations[id];
+                if (op) { op.completed = true; op.success = success; }
+            } else {
+                // fallback generic decrement: complete the oldest running
+                const running = Object.values(app._activity.operations).filter(o => !o.completed).sort((a, b) => a.started - b.started)[0];
+                if (running) { running.completed = true; running.success = success; }
+            }
+            app._renderActivity();
+            // Auto hide popup if no active operations
+            if (app._activity.count === 0) { popup.classList.remove('show'); }
+        };
+    }
+
+    // Click: navigate to Dashboard then toggle popup
+    indicator.addEventListener('click', () => {
+        try { app.switchSection('dashboard'); } catch (e) { }
+        // slight delay ensures dashboard DOM becomes active
+        setTimeout(() => { popup.classList.toggle('show'); }, 50);
+    });
+    closeBtn?.addEventListener('click', () => popup.classList.remove('show'));
+
+    // Close on outside click
+    document.addEventListener('click', (e) => {
+        if (!popup.contains(e.target) && !indicator.contains(e.target)) {
+            popup.classList.remove('show');
+        }
+    });
+})();
 
 // Handle page visibility change to manage connections
 document.addEventListener('visibilitychange', () => {
@@ -6997,7 +7444,9 @@ document.addEventListener('keydown', (e) => {
                 }
                 break;
             case 'ansible':
-                const ansibleMode = document.querySelector('.mode-btn.active').dataset.mode;
+                // Determine mode based on active main tab instead of mode buttons
+                const activeMainTab = document.querySelector('#ansible-section .tab-btn.active').dataset.tab;
+                const ansibleMode = activeMainTab === 'adhoc-ansible' ? 'adhoc' : 'playbook';
                 if (ansibleMode === 'playbook') {
                     const ansibleTab = document.querySelector('#ansible-section .tab-btn.active').dataset.tab;
                     if (ansibleTab === 'editor-ansible') {

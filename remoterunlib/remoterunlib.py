@@ -410,6 +410,7 @@ class SSHClient:
         ansible_remote_tmp=None,
         module="command",
         become=False,
+    force_adhoc=False,
     ):
         """
         Runs an Ansible playbook or an ad-hoc command targeting the remote host.
@@ -422,6 +423,7 @@ class SSHClient:
             inventory_file (str, optional): Path to inventory file. If None, a temporary inventory is created.
             module (str, optional): Ansible module to use for ad-hoc commands. Defaults to "command".
             become (bool, optional): Whether to run with privilege escalation (sudo). Defaults to False.
+            force_adhoc (bool, optional): If True, always treat input as an ad-hoc command even if a file exists at that path.
         """
         is_local = platform.system().lower() == "linux"
         if not is_local:
@@ -441,7 +443,9 @@ class SSHClient:
         if ansible_remote_tmp is None:
             ansible_remote_tmp = "/tmp"
 
-        is_playbook = os.path.isfile(playbook_or_command)
+        # Determine whether this is a playbook. If force_adhoc is True we ALWAYS
+        # treat it as an ad-hoc command even if the string is a valid file path.
+        is_playbook = False if force_adhoc else os.path.isfile(playbook_or_command)
         executable = "ansible-playbook" if is_playbook else "ansible"
 
         if not shutil.which(executable):
@@ -1626,9 +1630,22 @@ class SSHClient:
             return {"success": False, "error": "No connection"}
         
         try:
-            flag = "-a" if all_containers else ""
-            cmd = f"docker ps {flag} --format 'table {{.ID}}\t{{.Image}}\t{{.Command}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}'"
+            import json
+            base = "docker ps -a" if all_containers else "docker ps"
+            # Use JSON per line for robust parsing (no header)
+            cmd = base + " --format '{{json .}}'"
             output, errors = self.run_command(cmd, verbose=False)
+            containers = []
+            if output:
+                for line in output.strip().split('\n'):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                        containers.append(obj)
+                    except Exception:
+                        pass
             
             if errors and "command not found" in errors.lower():
                 return {"success": False, "error": "Docker is not installed on this machine"}
@@ -1636,6 +1653,7 @@ class SSHClient:
             return {
                 "success": True,
                 "output": output.strip() if output else "",
+                "containers": containers,
                 "errors": errors
             }
         except Exception as e:
