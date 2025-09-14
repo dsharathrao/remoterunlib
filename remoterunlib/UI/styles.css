@@ -439,6 +439,78 @@ body {
     margin: 0;
 }
 
+/* Directory Toolbar Enhancements */
+.directory-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: #ffffff;
+    border: 1px solid #e1e8ed;
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin: 8px 0 12px 0;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+
+.directory-toolbar .dir-path-label {
+    font-weight: 600;
+    font-family: monospace;
+    color: #2c3e50;
+    font-size: 13px;
+}
+
+.directory-toolbar .dir-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.directory-toolbar .btn.btn-sm {
+    min-height: 30px;
+}
+
+.filter-wrapper {
+    position: relative;
+}
+
+.filter-wrapper .file-filter {
+    padding-left: 32px;
+    width: 180px;
+}
+
+.filter-wrapper .filter-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #888;
+    font-size: 13px;
+}
+
+/* Selected file item */
+.directory-file-item.selected {
+    outline: 2px solid #3182ce;
+    background: #f0f8ff;
+}
+
+/* Loading overlay (optional future use) */
+.directory-loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 600;
+    color: #2c5282;
+}
+
 /* Execution Details Modal */
 .execution-modal .modal-content {
     max-width: 70vw;

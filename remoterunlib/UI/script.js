@@ -44,6 +44,9 @@ class RemoteRunApp {
         this.startPingInterval();
         this.setupNotificationSystem();
 
+        // Hierarchical directory enhancements (breadcrumbs, subdirectory + ZIP)
+        setTimeout(() => this.setupZipAndSubdirListeners(), 600);
+
         // Initialize running executions display (ensures spinner starts correctly)
         this.updateRunningExecutionsDisplay();
 
@@ -3492,6 +3495,8 @@ class RemoteRunApp {
             terraform: null,
             docker: null
         };
+        // Track current sub-path inside an opened project directory ('' = at project root)
+        this.currentSubPaths = { python: '', ansible: '', terraform: '', docker: '' };
 
         // Python directory management
         this.setupDirectoryManagement('python');
@@ -3537,7 +3542,7 @@ class RemoteRunApp {
         if (refreshBtn) {
             refreshBtn.addEventListener('click', () => {
                 if (this.currentDirectories[type]) {
-                    this.loadDirectoryContents(type, this.currentDirectories[type]);
+                    this.browseProjectDirectory(type, this.currentSubPaths[type] || '');
                 }
             });
         }
@@ -3716,6 +3721,7 @@ class RemoteRunApp {
 
     async openDirectory(type, dirName) {
         this.currentDirectories[type] = dirName;
+        this.currentSubPaths[type] = '';
 
         // Update UI
         document.getElementById(`${type}-current-directory`).textContent = `Directory: ${dirName}`;
@@ -3727,24 +3733,314 @@ class RemoteRunApp {
         });
         event.currentTarget.classList.add('selected');
 
-        // Load directory contents
-        this.loadDirectoryContents(type, dirName);
+        // Load hierarchical directory contents (project root)
+        this.browseProjectDirectory(type);
     }
 
-    async loadDirectoryContents(type, dirName) {
+    // Browse within an opened project directory using hierarchical backend
+    async browseProjectDirectory(type, subPath = '') {
+        const baseDir = this.currentDirectories[type];
+        if (!baseDir) return;
+        this.currentSubPaths[type] = subPath;
+        const relPath = baseDir + (subPath ? '/' + subPath : '');
         try {
-            const response = await fetch(`/api/directories/${type}/${dirName}`);
+            const response = await fetch(`/api/directories/${type}/browse?path=${encodeURIComponent(relPath)}`);
             if (response.ok) {
                 const data = await response.json();
-                this.renderDirectoryFiles(type, data.files);
-                this.updateFileSelector(type, data.files);
+                this.renderProjectDirectory(type, data, baseDir);
             } else {
-                const error = await response.json();
-                this.addLog(`Failed to load directory contents: ${error.error}`, 'error');
+                const err = await response.json().catch(() => ({ error: 'Failed' }));
+                this.addLog(`Failed to browse path: ${err.error || relPath}`, 'error');
             }
-        } catch (error) {
-            this.addLog(`Error loading directory contents: ${error.message}`, 'error');
+        } catch (e) {
+            this.addLog(`Error browsing directory: ${e.message}`, 'error');
         }
+    }
+
+    renderProjectDirectory(type, data, baseDir) {
+        // Render breadcrumbs relative to project root
+        const bcEl = document.getElementById(`${type}-breadcrumbs`);
+        if (bcEl) {
+            const crumbs = (data.breadcrumbs || []).filter(c => c.path && c.path.startsWith(baseDir));
+            // Ensure baseDir crumb present
+            const baseCrumb = { name: baseDir, path: baseDir };
+            const finalCrumbs = [baseCrumb];
+            crumbs.forEach(c => { if (c.path === baseDir) return; finalCrumbs.push(c); });
+            bcEl.innerHTML = finalCrumbs.map((c, i) => {
+                const relSub = c.path === baseDir ? '' : c.path.slice(baseDir.length + 1);
+                return `<span class="breadcrumb-seg" data-subpath="${relSub}" style="cursor:pointer;color:${i === finalCrumbs.length - 1 ? '#fff' : '#4aa3ff'};">${c.name}</span>${i < finalCrumbs.length - 1 ? '<span class="breadcrumb-sep" style="opacity:0.6;">/</span>' : ''}`;
+            }).join('');
+            bcEl.querySelectorAll('.breadcrumb-seg').forEach(seg => {
+                seg.addEventListener('click', (e) => {
+                    const sp = e.currentTarget.getAttribute('data-subpath');
+                    this.browseProjectDirectory(type, sp);
+                });
+            });
+        }
+
+        // Render directories + files list
+        const container = document.getElementById(`${type}-directory-files`);
+        if (!container) return;
+        // Ensure a toolbar + filter region exists just once
+        if (!container._enhanced) {
+            const toolbar = document.createElement('div');
+            toolbar.className = 'directory-toolbar';
+            toolbar.innerHTML = `
+                <div class="dir-path-label" id="${type}-path-label"></div>
+                <div class="dir-tools">
+                    <button class="btn btn-sm btn-secondary" data-action="up" title="Go Up One Level" aria-label="Go up one level"><i class="fas fa-level-up-alt"></i></button>
+                    <button class="btn btn-sm btn-secondary" data-action="refresh" title="Refresh" aria-label="Refresh directory"><i class="fas fa-sync"></i></button>
+                    <button class="btn btn-sm btn-secondary" data-action="upload" title="Upload Files" aria-label="Upload files"><i class="fas fa-upload"></i></button>
+                    <button class="btn btn-sm btn-secondary" data-action="new-folder" title="New Subdirectory" aria-label="Create subdirectory"><i class="fas fa-folder-plus"></i></button>
+                    <button class="btn btn-sm btn-secondary" data-action="zip" title="Upload & Extract ZIP" aria-label="Upload ZIP and extract"><i class="fas fa-file-zipper"></i></button>
+                    <div class="filter-wrapper">
+                        <input type="text" id="${type}-file-filter" class="form-control file-filter" placeholder="Filter files..." aria-label="Filter files" />
+                        <i class="fas fa-filter filter-icon"></i>
+                    </div>
+                </div>`;
+            container.parentElement?.insertBefore(toolbar, container);
+            // Event delegation for toolbar actions
+            toolbar.addEventListener('click', (e) => {
+                const btn = e.target.closest('button[data-action]');
+                if (!btn) return;
+                const action = btn.getAttribute('data-action');
+                const currentSub = this.currentSubPaths[type] || '';
+                if (action === 'refresh') this.browseProjectDirectory(type, currentSub);
+                else if (action === 'up') {
+                    if (!currentSub) return; // already at root
+                    const parts = currentSub.split('/').filter(Boolean); parts.pop();
+                    this.browseProjectDirectory(type, parts.join('/'));
+                } else if (action === 'new-folder') {
+                    const subInput = document.getElementById(`${type}-new-subdir-name`);
+                    if (subInput) subInput.focus();
+                } else if (action === 'upload') {
+                    const fileInput = document.getElementById(`${type}-dir-file-input`);
+                    if (fileInput) fileInput.click();
+                } else if (action === 'zip') {
+                    const zipInput = document.getElementById(`${type}-zip-upload-input`);
+                    if (zipInput) zipInput.click();
+                }
+            });
+            const filterInput = toolbar.querySelector(`#${type}-file-filter`);
+            filterInput.addEventListener('input', (e) => {
+                this.filterDirectoryList(type, e.target.value.trim().toLowerCase());
+            });
+            container._enhanced = true;
+        }
+
+        // Update path label
+        const pathLabel = document.getElementById(`${type}-path-label`);
+        if (pathLabel) {
+            const subPath = this.currentSubPaths[type] || '';
+            pathLabel.textContent = subPath ? `/${subPath}` : '/';
+        }
+
+        container.innerHTML = '';
+        const dirs = data.directories || [];
+        const files = data.files || [];
+        if (!dirs.length && !files.length) {
+            container.innerHTML = `<div class="empty-directory"><i class="fas fa-folder-open"></i><p>Empty</p><small>Upload or create content</small></div>`;
+            return;
+        }
+        // Directories
+        dirs.forEach(d => {
+            const el = document.createElement('div');
+            el.className = 'directory-file-item';
+            el.style.cursor = 'pointer';
+            el.innerHTML = `
+                <div class="file-info-left">
+                    <div class="file-icon" style="background:#2d5a9e;">DIR</div>
+                    <div>
+                        <div class="file-name">${d.name}</div>
+                        <div class="file-meta">Modified: ${new Date(d.modified * 1000).toLocaleString()}</div>
+                    </div>
+                </div>
+                <div class="file-actions">
+                    <button class="file-action-btn rename" title="Rename" data-path="${d.path}"><i class="fas fa-tag"></i></button>
+                </div>`;
+            el.addEventListener('dblclick', () => this.browseProjectDirectory(type, d.path.slice(baseDir.length + 1)));
+            el.addEventListener('click', (e) => { if (e.detail === 2) return; });
+            const renameBtn = el.querySelector('.rename');
+            renameBtn.addEventListener('click', (e) => { e.stopPropagation(); this.renamePathPrompt(type, d.path); });
+            container.appendChild(el);
+        });
+        // Files
+        files.forEach(f => {
+            const extension = (f.extension || '').toLowerCase();
+            let iconBg = '#555';
+            if (extension === '.py') iconBg = '#3776ab'; else if (['.yml', '.yaml'].includes(extension)) iconBg = '#996515'; else if (extension === '.tf') iconBg = '#844fba'; else if (extension.includes('docker')) iconBg = '#0db7ed';
+            const el = document.createElement('div');
+            el.className = 'directory-file-item';
+            el.innerHTML = `
+                <div class="file-info-left">
+                    <div class="file-icon" style="background:${iconBg};">${extension.replace('.', '').toUpperCase() || 'FILE'}</div>
+                    <div>
+                        <div class="file-name">${f.name}</div>
+                        <div class="file-meta">${this.formatFileSize(f.size || 0)} • Modified: ${new Date(f.modified * 1000).toLocaleString()}</div>
+                    </div>
+                </div>
+                <div class="file-actions">
+                    <button class="file-action-btn" title="View" data-path="${f.path}" data-action="view"><i class="fas fa-eye"></i></button>
+                    <button class="file-action-btn edit" title="Edit" data-path="${f.path}" data-action="edit"><i class="fas fa-edit"></i></button>
+                    <button class="file-action-btn rename" title="Rename" data-path="${f.path}" data-action="rename"><i class="fas fa-tag"></i></button>
+                    <button class="file-action-btn delete" title="Delete" data-path="${f.path}" data-action="delete"><i class="fas fa-trash"></i></button>
+                </div>`;
+            el.addEventListener('click', () => {
+                // Toggle selection highlight (single select)
+                container.querySelectorAll('.directory-file-item.selected').forEach(sel => sel.classList.remove('selected'));
+                el.classList.add('selected');
+            });
+            el.querySelectorAll('.file-action-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const action = btn.getAttribute('data-action');
+                    const p = btn.getAttribute('data-path');
+                    if (action === 'view') this.viewPathFile(type, p);
+                    else if (action === 'edit') this.editPathFile(type, p);
+                    else if (action === 'rename') this.renamePathPrompt(type, p);
+                    else if (action === 'delete') this.deletePathFile(type, p);
+                });
+            });
+            container.appendChild(el);
+        });
+        // Apply existing filter if user typed something
+        const existingFilter = document.getElementById(`${type}-file-filter`);
+        if (existingFilter && existingFilter.value) this.filterDirectoryList(type, existingFilter.value.trim().toLowerCase());
+    }
+
+    filterDirectoryList(type, term) {
+        const container = document.getElementById(`${type}-directory-files`); if (!container) return;
+        const items = container.querySelectorAll('.directory-file-item');
+        items.forEach(item => {
+            if (!term) { item.style.display = ''; return; }
+            const name = (item.querySelector('.file-name')?.textContent || '').toLowerCase();
+            item.style.display = name.includes(term) ? '' : 'none';
+        });
+    }
+
+    renamePathPrompt(type, relPath) {
+        const baseName = relPath.split('/').pop();
+        const newName = prompt(`Rename '${baseName}' to:`, baseName);
+        if (!newName || newName.trim() === baseName) return;
+        fetch(`/api/directories/${type}/rename`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: relPath, new_name: newName.trim() }) })
+            .then(r => r.json().then(j => ({ ok: r.ok, json: j })))
+            .then(res => {
+                if (res.ok) { this.addLog(`Renamed to ${res.json.new_path}`, 'success'); this.browseProjectDirectory(type, this.currentSubPaths[type]); }
+                else alert(`Rename failed: ${res.json.error}`);
+            }).catch(e => this.addLog(`Rename error: ${e.message}`, 'error'));
+    }
+
+    async viewPathFile(type, relFilePath) {
+        try {
+            const r = await fetch(`/api/directories/${type}/file?path=${encodeURIComponent(relFilePath)}`);
+            const data = await r.json();
+            if (!r.ok) { alert(data.error || 'Failed'); return; }
+            this.showFileContentModal(data.path.split('/').pop(), data.content);
+        } catch (e) { this.addLog(`View file error: ${e.message}`, 'error'); }
+    }
+    async editPathFile(type, relFilePath) {
+        try {
+            const r = await fetch(`/api/directories/${type}/file?path=${encodeURIComponent(relFilePath)}`);
+            const data = await r.json(); if (!r.ok) { alert(data.error || 'Failed'); return; }
+            // Switch to editor tab and populate
+            this.switchSection(type);
+            const editorTabSelector = type === 'python' ? `#${type}-section [data-tab="editor"]` : type === 'ansible' ? `#${type}-section [data-tab="editor-ansible"]` : type === 'terraform' ? `#${type}-section [data-tab="editor-tf"]` : type === 'docker' ? `#${type}-section [data-tab="editor-docker"]` : '';
+            const editorTab = document.querySelector(editorTabSelector); if (editorTab) editorTab.click();
+            const editor = document.getElementById(`${type}-editor`); if (editor) editor.value = data.content;
+            const filenameInput = document.getElementById(`${type}-filename`); if (filenameInput) filenameInput.value = data.path.split('/').pop();
+            // Track editing context for save (reuse existing logic if any)
+            this.editingContext = { type, filename: data.path.split('/').pop(), directory: this.currentDirectories[type] };
+        } catch (e) { this.addLog(`Edit file error: ${e.message}`, 'error'); }
+    }
+    async deletePathFile(type, relFilePath) {
+        if (!confirm(`Delete file '${relFilePath.split('/').pop()}'?`)) return;
+        try {
+            const r = await fetch(`/api/directories/${type}/file?path=${encodeURIComponent(relFilePath)}`, { method: 'DELETE' });
+            const data = await r.json(); if (!r.ok) { alert(data.error || 'Failed'); return; }
+            this.addLog(`Deleted ${data.deleted}`, 'success');
+            this.browseProjectDirectory(type, this.currentSubPaths[type]);
+        } catch (e) { this.addLog(`Delete file error: ${e.message}`, 'error'); }
+    }
+
+    // Subdirectory creation within project
+    createSubdirectory(type) {
+        const baseDir = this.currentDirectories[type]; if (!baseDir) return;
+        const nameInput = document.getElementById(`${type}-new-subdir-name`); if (!nameInput) return;
+        const name = nameInput.value.trim(); if (!name) return;
+        const subPath = this.currentSubPaths[type];
+        const parentRel = baseDir + (subPath ? '/' + subPath : '');
+        fetch(`/api/directories/${type}/mkdir`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: parentRel, name }) })
+            .then(r => r.json().then(j => ({ ok: r.ok, json: j })))
+            .then(res => { if (res.ok) { nameInput.value = ''; this.addLog(`Created folder ${res.json.created}`, 'success'); this.browseProjectDirectory(type, subPath); } else alert(res.json.error || 'Failed'); })
+            .catch(e => this.addLog(`Create subdir error: ${e.message}`, 'error'));
+    }
+
+    // ZIP upload & extract for current path
+    setupZipAndSubdirListeners() {
+        ['python', 'ansible', 'terraform', 'docker'].forEach(type => {
+            const createBtn = document.getElementById(`${type}-create-subdir-btn`);
+            if (createBtn) { createBtn.addEventListener('click', () => this.createSubdirectory(type)); }
+            const subInput = document.getElementById(`${type}-new-subdir-name`);
+            if (subInput) { subInput.addEventListener('keypress', e => { if (e.key === 'Enter') this.createSubdirectory(type); }); }
+            const zipBtn = document.getElementById(`${type}-upload-zip-btn`);
+            const zipInput = document.getElementById(`${type}-zip-upload-input`);
+            if (zipBtn && zipInput) {
+                zipBtn.addEventListener('click', () => zipInput.click());
+                zipInput.addEventListener('change', (e) => { const file = e.target.files?.[0]; if (file) this.extractZipUpload(type, file); });
+            }
+        });
+    }
+
+    async extractZipUpload(type, file) {
+        // Show spinner/message during ZIP processing
+        const spinnerId = `${type}-zip-spinner`;
+        let spinner = document.getElementById(spinnerId);
+        if (!spinner) {
+            spinner = document.createElement('div');
+            spinner.id = spinnerId;
+            spinner.className = 'zip-upload-spinner';
+            spinner.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing ZIP...';
+            const container = document.getElementById(`${type}-directory-files`);
+            if (container) container.prepend(spinner);
+        }
+        try {
+            const arrayBuf = await file.arrayBuffer();
+            const b64 = this.arrayBufferToBase64(arrayBuf);
+            const baseDir = this.currentDirectories[type];
+            const sub = this.currentSubPaths[type];
+            const relPath = baseDir + (sub ? '/' + sub : '');
+            const r = await fetch(`/api/directories/${type}/extract-zip`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: relPath, zip_content: b64, overwrite: true })
+            });
+            const data = await r.json();
+            if (!r.ok) {
+                this.addLog(data.error || 'ZIP extract failed', 'error');
+                spinner.innerHTML = `<span style="color:red"><i class='fas fa-exclamation-circle'></i> ZIP extract failed: ${this.escapeHtml(data.error || 'Unknown error')}</span>`;
+                setTimeout(() => spinner.remove(), 3000);
+                return;
+            }
+            this.addLog(`Extracted ${data.count} items from ZIP`, 'success');
+            spinner.innerHTML = `<span style="color:green"><i class='fas fa-check-circle'></i> ZIP extracted: ${data.count} items</span>`;
+            setTimeout(() => spinner.remove(), 2000);
+            this.browseProjectDirectory(type, sub);
+        } catch (e) {
+            this.addLog(`ZIP extract error: ${e.message}`, 'error');
+            if (spinner) {
+                spinner.innerHTML = `<span style="color:red"><i class='fas fa-exclamation-circle'></i> ZIP extract error: ${this.escapeHtml(e.message)}</span>`;
+                setTimeout(() => spinner.remove(), 3000);
+            }
+        }
+    }
+    arrayBufferToBase64(buffer) {
+        let binary = ''; const bytes = new Uint8Array(buffer); const len = bytes.byteLength; for (let i = 0; i < len; i++) { binary += String.fromCharCode(bytes[i]); }
+        return btoa(binary);
+    }
+
+    // Ensure listeners setup after init
+    async loadDirectoryContents(type, dirName) { // Backward compatibility wrapper
+        this.browseProjectDirectory(type, this.currentSubPaths[type] || '');
     }
 
     renderDirectoryFiles(type, files) {
@@ -3967,38 +4263,23 @@ class RemoteRunApp {
     }
 
     async handleDirectoryFileUpload(type, files) {
-        if (!this.currentDirectories[type]) {
-            alert('Please select a directory first');
-            return;
-        }
-
-        const dirName = this.currentDirectories[type];
+        if (!this.currentDirectories[type]) { alert('Please select a directory first'); return; }
+        const baseDir = this.currentDirectories[type];
+        const sub = this.currentSubPaths ? this.currentSubPaths[type] : '';
+        const relPath = baseDir + (sub ? '/' + sub : '');
         const filesData = [];
-
         for (const file of files) {
             const content = await this.readFileContent(file);
-            filesData.push({
-                name: file.name,
-                content: content
-            });
+            filesData.push({ name: file.name, content });
         }
-
         try {
-            const response = await fetch(`/api/directories/${type}/${dirName}/files`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ files: filesData })
-            });
-
+            const response = await fetch(`/api/directories/${type}/upload`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: relPath, files: filesData, overwrite: true }) });
+            const result = await response.json();
             if (response.ok) {
-                const result = await response.json();
-                this.addLog(`Uploaded ${result.uploaded_files.length} files to '${dirName}'`, 'success');
-                this.loadDirectoryContents(type, dirName);
+                this.addLog(`Uploaded ${result.count || filesData.length} files to '${relPath}'`, 'success');
+                this.browseProjectDirectory(type, sub);
             } else {
-                const error = await response.json();
-                alert(`Failed to upload files: ${error.error}`);
+                alert(`Failed to upload files: ${result.error || 'Unknown error'}`);
             }
         } catch (error) {
             this.addLog(`Error uploading files: ${error.message}`, 'error');
@@ -4084,7 +4365,7 @@ class RemoteRunApp {
 
             if (response.ok) {
                 this.addLog(`File '${filename}' deleted successfully`, 'success');
-                this.loadDirectoryContents(type, dirName);
+                this.browseProjectDirectory(type, this.currentSubPaths[type] || '');
             } else {
                 const error = await response.json();
                 alert(`Failed to delete file: ${error.error}`);
@@ -4263,7 +4544,7 @@ class RemoteRunApp {
 
                 // Refresh directory contents to show the updated file
                 this.addLog(`Refreshing directory contents for '${directory}'...`, 'info');
-                this.loadDirectoryContents(type, directory);
+                this.browseProjectDirectory(type, this.currentSubPaths[type] || '');
 
                 alert(`File '${filename}' saved successfully!`);
             } else {
@@ -4301,7 +4582,7 @@ class RemoteRunApp {
             if (response.ok) {
                 const result = await response.json();
                 this.addLog(`File renamed from '${oldName}' to '${newName}'`, 'success');
-                this.loadDirectoryContents(type, dirName);
+                this.browseProjectDirectory(type, this.currentSubPaths[type] || '');
             } else {
                 const error = await response.json();
                 alert(`Failed to rename file: ${error.error}`);

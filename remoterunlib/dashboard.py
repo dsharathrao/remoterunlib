@@ -1530,6 +1530,271 @@ This directory contains {script_type} files and configurations.
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
 
+        # ================= HIERARCHICAL DIRECTORY MANAGEMENT (NEW) =================
+        def _sanitize_rel_path(rel_path: str) -> str:
+            """Sanitize and normalize a relative path, preventing traversal outside base directory."""
+            if rel_path is None:
+                return ""
+            rel_path = rel_path.replace("\\", "/").strip()
+            # Remove leading slash
+            while rel_path.startswith('/'):
+                rel_path = rel_path[1:]
+            # Collapse redundant separators and dots
+            parts = [p for p in rel_path.split('/') if p not in ('', '.')]
+            for p in parts:
+                if p == '..':  # Explicit traversal attempt
+                    raise ValueError("Parent path '..' is not allowed")
+            normalized = '/'.join(parts)
+            return normalized
+
+        def _resolve_abs_path(script_type: str, rel_path: str) -> str:
+            base_dir = os.path.join(self.directories_base_path, script_type)
+            os.makedirs(base_dir, exist_ok=True)
+            rel_norm = _sanitize_rel_path(rel_path or "")
+            abs_path = os.path.join(base_dir, rel_norm)
+            # Final security check
+            base_abs = os.path.abspath(base_dir)
+            target_abs = os.path.abspath(abs_path)
+            if not target_abs.startswith(base_abs):
+                raise ValueError("Resolved path escapes base directory")
+            return abs_path
+
+        def _build_breadcrumbs(rel_path: str):
+            rel_norm = _sanitize_rel_path(rel_path or "")
+            if not rel_norm:
+                return [{"name": "root", "path": ""}]
+            crumbs = [{"name": "root", "path": ""}]
+            accum = []
+            for segment in rel_norm.split('/'):
+                accum.append(segment)
+                crumbs.append({"name": segment, "path": '/'.join(accum)})
+            return crumbs
+
+        @app.route('/api/directories/<script_type>/browse', methods=['GET'])
+        def browse_hierarchy(script_type):
+            """Browse a hierarchical path returning directories, files, and breadcrumbs.
+            Query params: path (relative path inside project type root)
+            """
+            try:
+                rel_path = request.args.get('path', '')
+                abs_path = _resolve_abs_path(script_type, rel_path)
+                if rel_path and not os.path.exists(abs_path):
+                    return jsonify({"error": "Path not found", "path": rel_path}), 404
+                dirs = []
+                files = []
+                if os.path.exists(abs_path):
+                    for item in sorted(os.listdir(abs_path)):
+                        item_path = os.path.join(abs_path, item)
+                        stat = os.stat(item_path)
+                        if os.path.isdir(item_path):
+                            dirs.append({
+                                "name": item,
+                                "path": _sanitize_rel_path(os.path.join(rel_path, item)),
+                                "modified": stat.st_mtime,
+                                "created": stat.st_ctime,
+                                "type": "directory"
+                            })
+                        else:
+                            files.append({
+                                "name": item,
+                                "path": _sanitize_rel_path(os.path.join(rel_path, item)),
+                                "size": stat.st_size,
+                                "modified": stat.st_mtime,
+                                "extension": os.path.splitext(item)[1],
+                                "type": "file"
+                            })
+                breadcrumbs = _build_breadcrumbs(rel_path)
+                return jsonify({
+                    "path": _sanitize_rel_path(rel_path),
+                    "directories": dirs,
+                    "files": files,
+                    "breadcrumbs": breadcrumbs,
+                    "empty": not dirs and not files
+                })
+            except ValueError as ve:
+                return jsonify({"error": str(ve)}), 400
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @app.route('/api/directories/<script_type>/mkdir', methods=['POST'])
+        def mkdir_hierarchy(script_type):
+            """Create a subdirectory under a given relative path.
+            JSON body: {path: 'parent/rel/path', name: 'newDir'}
+            """
+            try:
+                data = request.json or {}
+                parent = data.get('path', '')
+                name = (data.get('name') or '').strip()
+                if not name:
+                    return jsonify({"error": "Directory name is required"}), 400
+                import re
+                name = re.sub(r'[^A-Za-z0-9_\-.]', '_', name)
+                parent_abs = _resolve_abs_path(script_type, parent)
+                target_abs = os.path.join(parent_abs, name)
+                os.makedirs(parent_abs, exist_ok=True)
+                if os.path.exists(target_abs):
+                    return jsonify({"error": "Directory already exists"}), 400
+                os.makedirs(target_abs)
+                # Add placeholder README if at top-level (optional)
+                try:
+                    readme_path = os.path.join(target_abs, 'README.md')
+                    if not os.path.exists(readme_path):
+                        with open(readme_path, 'w', encoding='utf-8') as f:
+                            f.write(f"# {name}\n\nCreated {datetime.datetime.utcnow().isoformat()} UTC\n")
+                except Exception:
+                    pass
+                rel_full = _sanitize_rel_path(os.path.join(parent, name))
+                return jsonify({"success": True, "path": rel_full, "name": name})
+            except ValueError as ve:
+                return jsonify({"error": str(ve)}), 400
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @app.route('/api/directories/<script_type>/upload', methods=['POST'])
+        def upload_hierarchy(script_type):
+            """Upload (create/update) files under a hierarchical path.
+            JSON body: {path: 'rel/path', files: [{name, content, base64: bool}], overwrite: bool}
+            """
+            try:
+                data = request.json or {}
+                rel_path = data.get('path', '')
+                files_data = data.get('files', [])
+                overwrite = bool(data.get('overwrite', True))
+                dest_abs = _resolve_abs_path(script_type, rel_path)
+                os.makedirs(dest_abs, exist_ok=True)
+                written = []
+                import base64
+                for fd in files_data:
+                    fname = (fd.get('name') or '').strip()
+                    if not fname:
+                        continue
+                    import re
+                    fname = re.sub(r'[^A-Za-z0-9_\-.]', '_', fname)
+                    f_abs = os.path.join(dest_abs, fname)
+                    if os.path.exists(f_abs) and not overwrite:
+                        continue
+                    content = fd.get('content', '')
+                    if fd.get('base64'):
+                        try:
+                            content_bytes = base64.b64decode(content)
+                            with open(f_abs, 'wb') as f:
+                                f.write(content_bytes)
+                        except Exception as be:
+                            return jsonify({"error": f"Failed to decode base64 for {fname}: {be}"}), 400
+                    else:
+                        with open(f_abs, 'w', encoding='utf-8') as f:
+                            f.write(content)
+                    written.append(fname)
+                return jsonify({"success": True, "written": written, "count": len(written)})
+            except ValueError as ve:
+                return jsonify({"error": str(ve)}), 400
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @app.route('/api/directories/<script_type>/file', methods=['GET', 'PUT', 'DELETE'])
+        def file_hierarchy(script_type):
+            """CRUD operations for a single file using ?path=relative/path/to/file"""
+            try:
+                rel_file = request.args.get('path') if request.method == 'GET' else (request.json or {}).get('path')
+                if not rel_file:
+                    return jsonify({"error": "File path is required"}), 400
+                abs_file = _resolve_abs_path(script_type, rel_file)
+                if request.method == 'GET':
+                    if not os.path.exists(abs_file) or not os.path.isfile(abs_file):
+                        return jsonify({"error": "File not found"}), 404
+                    with open(abs_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    return jsonify({"path": _sanitize_rel_path(rel_file), "content": content})
+                elif request.method == 'PUT':
+                    data = request.json or {}
+                    content = data.get('content', '')
+                    os.makedirs(os.path.dirname(abs_file), exist_ok=True)
+                    # Backup
+                    if os.path.exists(abs_file):
+                        try:
+                            shutil.copy2(abs_file, abs_file + '.backup')
+                        except Exception:
+                            pass
+                    with open(abs_file, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    return jsonify({"success": True, "path": _sanitize_rel_path(rel_file)})
+                else:  # DELETE
+                    if not os.path.exists(abs_file):
+                        return jsonify({"error": "File not found"}), 404
+                    os.remove(abs_file)
+                    return jsonify({"success": True, "deleted": _sanitize_rel_path(rel_file)})
+            except ValueError as ve:
+                return jsonify({"error": str(ve)}), 400
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @app.route('/api/directories/<script_type>/rename', methods=['POST'])
+        def rename_path(script_type):
+            """Rename a file or directory. JSON: {path: 'old/path', new_name: 'new'}"""
+            try:
+                data = request.json or {}
+                rel_old = data.get('path')
+                new_name = (data.get('new_name') or '').strip()
+                if not rel_old or not new_name:
+                    return jsonify({"error": "path and new_name required"}), 400
+                import re
+                new_name = re.sub(r'[^A-Za-z0-9_\-.]', '_', new_name)
+                abs_old = _resolve_abs_path(script_type, rel_old)
+                if not os.path.exists(abs_old):
+                    return jsonify({"error": "Source path not found"}), 404
+                parent_rel = '/'.join(_sanitize_rel_path(rel_old).split('/')[:-1])
+                parent_abs = _resolve_abs_path(script_type, parent_rel)
+                abs_new = os.path.join(parent_abs, new_name)
+                if os.path.exists(abs_new):
+                    return jsonify({"error": "Target already exists"}), 400
+                os.rename(abs_old, abs_new)
+                new_rel = _sanitize_rel_path(os.path.join(parent_rel, new_name))
+                return jsonify({"success": True, "old_path": _sanitize_rel_path(rel_old), "new_path": new_rel})
+            except ValueError as ve:
+                return jsonify({"error": str(ve)}), 400
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @app.route('/api/directories/<script_type>/extract-zip', methods=['POST'])
+        def extract_zip(script_type):
+            """Upload a base64 zip archive and extract into path. JSON: {path: 'rel/path', zip_content: 'base64', overwrite: bool}"""
+            try:
+                data = request.json or {}
+                rel_path = data.get('path', '')
+                zip_b64 = data.get('zip_content')
+                overwrite = bool(data.get('overwrite', True))
+                if not zip_b64:
+                    return jsonify({"error": "zip_content required"}), 400
+                import base64, io, zipfile
+                dest_abs = _resolve_abs_path(script_type, rel_path)
+                os.makedirs(dest_abs, exist_ok=True)
+                raw = base64.b64decode(zip_b64)
+                with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                    extracted = []
+                    for member in zf.infolist():
+                        # Skip directories
+                        if member.is_dir():
+                            continue
+                        # Sanitize member path
+                        member_name = member.filename.replace('\\', '/').strip()
+                        if member_name.startswith('/'):
+                            member_name = member_name[1:]
+                        if '..' in member_name.split('/'):
+                            continue  # Skip unsafe
+                        target_path = os.path.join(dest_abs, member_name)
+                        target_dir = os.path.dirname(target_path)
+                        os.makedirs(target_dir, exist_ok=True)
+                        if os.path.exists(target_path) and not overwrite:
+                            continue
+                        with zf.open(member) as src, open(target_path, 'wb') as dst:
+                            shutil.copyfileobj(src, dst)
+                        extracted.append(_sanitize_rel_path(os.path.join(rel_path, member_name)))
+                return jsonify({"success": True, "extracted": extracted, "count": len(extracted)})
+            except ValueError as ve:
+                return jsonify({"error": str(ve)}), 400
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
         # --- Enhanced Project Directory Execution ---
         @app.route("/api/execute-project", methods=["POST"])
         def execute_project():
