@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "remoteinfra"
-version = "1.0.0"
+version = "1.0.1"
 description = "Enterprise remote management library for SSH, Docker, Ansible, Terraform, PowerShell, and web dashboard automation."
 readme = "README.md"
 authors = ["Sharath Kumar <dsharathrao@gmail.com>"]
